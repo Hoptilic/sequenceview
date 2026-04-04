@@ -1,48 +1,35 @@
 # Protein Function Classifier
 
-This project downloads labeled protein sequences from UniProt and trains a small PyTorch classifier to distinguish enzymes from non-enzymes.
+This repository is centered on a single Google Colab notebook: [colab_training.ipynb](colab_training.ipynb).
 
-The label is derived from UniProt annotations:
+It trains a PyTorch sequence classifier on UniProt amino acid sequences for a narrower binary task:
 
-- `enzyme`: reviewed UniProt entries with an EC number
-- `non-enzyme`: reviewed UniProt entries without an EC number
+- `oxidoreductase` (EC 1.*)
+- `hydrolase` (EC 3.*)
 
-## Install
+## Training Workflow
 
-```bash
-python3 -m pip install -r requirements.txt
-```
+Open [colab_training.ipynb](colab_training.ipynb) in Google Colab and run Cell 2 with GPU enabled.
 
-## Train
+The notebook does everything end-to-end:
 
-```bash
-python3 train.py
-```
+1. Installs dependencies (`requests`, `torch`).
+2. Downloads reviewed UniProt entries for both classes.
+3. Caches data to `/content/uniprot_binary_dataset.jsonl`.
+4. Splits data with a sequence-identity-aware strategy to reduce leakage.
+5. Trains a BiGRU-based classifier with AMP, gradient clipping, and early stopping.
+6. Evaluates on a held-out test split.
+7. Saves a checkpoint to Google Drive (if mounted) or local Colab storage.
 
-If you want to train in Google Colab, open [colab_training.ipynb](colab_training.ipynb) and run it with GPU enabled.
+## Outputs
 
-The script will:
-
-1. Download the sequences from UniProt.
-2. Cache them under `data/`.
-3. Train a simple CNN classifier in PyTorch.
-4. Save the checkpoint under `artifacts/`.
-
-## Predict
-
-```bash
-python3 train.py --predict MVLSPADKTNVKAAW
-```
-
-## Tuning
-
-Useful flags:
-
-- `--enzyme-count` and `--non-enzyme-count` to control dataset size
-- `--max-length` to control truncation/padding length
-- `--epochs` and `--batch-size` for training speed/quality tradeoffs
-- `--refresh-data` to force a new UniProt download
+- Per-epoch metrics: `train_loss`, `train_accuracy`, `validation_loss`, `validation_accuracy`
+- Final test metrics dictionary
+- Saved checkpoint path (default: `/content/drive/MyDrive/protein_classifier.pt`)
+- Example inference output for a short amino acid sequence
 
 ## Notes
 
-This is a lightweight baseline, not a production biology model. The labels are annotation-based and the classifier is intentionally simple so it stays easy to run and inspect.
+- This is a practical baseline for experimentation, not a production biology model.
+- Labels are annotation-derived from UniProt queries and may include noise.
+- If you change class counts or split parameters, rerun the training cell to regenerate cache and metrics.
