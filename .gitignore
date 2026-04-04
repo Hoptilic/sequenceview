@@ -5,3 +5,5 @@ __pycache__/
 venv/
 data/
 artifacts/
+*/protein_classifier.pt
+protein_classifier.pt
