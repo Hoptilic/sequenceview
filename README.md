@@ -64,10 +64,24 @@ The API starts on `http://localhost:5000`.
 }
 ```
 
+	- Input tips:
+		- You can send plain amino acid sequence text or FASTA text.
+		- FASTA header lines starting with `>` are ignored automatically.
+		- For best results, provide the canonical amino acid sequence only.
+
 	- Response includes:
 		- Input sequence
 		- Biopython stats (`molecular_weight`, `amino_acid_frequency`, etc.)
 		- Model output (`class_name`, class probabilities)
+		- Confidence fields (`confidence`, `margin`, `is_uncertain`)
+
+### Confidence Handling
+
+The classifier now marks low-confidence predictions as `uncertain` instead of forcing a hard class.
+
+- `prediction.class_name` is `uncertain` when confidence is below threshold.
+- `prediction.predicted_class` still shows the top raw class.
+- Default threshold is `0.70` and can be changed via `SEQUENCEVIEW_CONFIDENCE_THRESHOLD`.
 
 ## Training Workflow
 

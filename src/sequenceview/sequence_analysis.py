@@ -13,7 +13,11 @@ VALID_AMINO_ACIDS = set(AA_ALPHABET)
 
 
 def normalize_sequence(raw_sequence: str) -> str:
-    sequence = "".join(raw_sequence.split()).upper()
+    lines = [line.strip() for line in raw_sequence.splitlines() if line.strip()]
+    if any(line.startswith(">") for line in lines):
+        # FASTA headers start with '>' and should never be part of the sequence.
+        lines = [line for line in lines if not line.startswith(">")]
+    sequence = "".join(lines).replace(" ", "").upper()
     return sequence
 
 

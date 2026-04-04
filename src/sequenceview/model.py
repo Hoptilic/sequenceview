@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -63,6 +64,7 @@ class ProteinModelService:
         self.max_length = 768
         self.metadata: dict[str, Any] = {}
         self.model_loaded = False
+        self.confidence_threshold = float(os.getenv("SEQUENCEVIEW_CONFIDENCE_THRESHOLD", "0.70"))
 
     def load(self) -> None:
         if not self.checkpoint_path.exists():
@@ -90,12 +92,24 @@ class ProteinModelService:
             probabilities = torch.softmax(self.model(input_tensor), dim=1)[0].cpu()
 
         predicted_index = int(probabilities.argmax().item())
+        predicted_class = "oxidoreductase" if predicted_index == 1 else "hydrolase"
+        confidence = float(probabilities[predicted_index].item())
+        hydrolase_probability = float(probabilities[0].item())
+        oxidoreductase_probability = float(probabilities[1].item())
+        margin = float(abs(oxidoreductase_probability - hydrolase_probability))
+        is_uncertain = confidence < self.confidence_threshold
+
         return {
             "label": predicted_index,
-            "class_name": "oxidoreductase" if predicted_index == 1 else "hydrolase",
+            "class_name": "uncertain" if is_uncertain else predicted_class,
+            "predicted_class": predicted_class,
+            "is_uncertain": is_uncertain,
+            "confidence": confidence,
+            "confidence_threshold": self.confidence_threshold,
+            "margin": margin,
             "probabilities": {
-                "hydrolase": float(probabilities[0].item()),
-                "oxidoreductase": float(probabilities[1].item()),
+                "hydrolase": hydrolase_probability,
+                "oxidoreductase": oxidoreductase_probability,
             },
             "max_length": self.max_length,
             "metadata": self.metadata,
