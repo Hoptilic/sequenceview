@@ -204,6 +204,11 @@ button:hover {
   grid-column: span 12;
 }
 
+.wide-card h3,
+.full-card h3 {
+  margin-top: 0;
+}
+
 .full-card {
   grid-column: span 12;
 }

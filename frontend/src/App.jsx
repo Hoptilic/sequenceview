@@ -17,6 +17,58 @@ function formatPercent(value) {
   return `${(value * 100).toFixed(1)}%`;
 }
 
+function downloadFile(content, filename, mimeType) {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
+function makeCsvValue(value) {
+  const text = String(value ?? "");
+  if (text.includes(",") || text.includes("\n") || text.includes('"')) {
+    return `"${text.replaceAll('"', '""')}"`;
+  }
+  return text;
+}
+
+function buildReportCsv(result) {
+  const prediction = result?.prediction || {};
+  const analysis = result?.analysis || {};
+  const probabilities = prediction.probabilities || {};
+  const aaFrequency = analysis.amino_acid_frequency || {};
+
+  const rows = [
+    ["field", "value"],
+    ["predicted_function", prediction.class_name || ""],
+    ["predicted_top_class", prediction.predicted_class || ""],
+    ["confidence", prediction.confidence ?? ""],
+    ["confidence_threshold", prediction.confidence_threshold ?? ""],
+    ["is_uncertain", prediction.is_uncertain ?? ""],
+    ["sequence_length", analysis.length ?? ""],
+    ["molecular_weight", analysis.molecular_weight ?? ""],
+    ["isoelectric_point", analysis.isoelectric_point ?? ""],
+    ["aromaticity", analysis.aromaticity ?? ""],
+    ["instability_index", analysis.instability_index ?? ""],
+    ["gravy", analysis.gravy ?? ""],
+    ["hydrolase_probability", probabilities.hydrolase ?? ""],
+    ["oxidoreductase_probability", probabilities.oxidoreductase ?? ""],
+    ["invalid_residues", (analysis.invalid_residues || []).join(";")],
+    [],
+    ["amino_acid", "frequency_fraction"],
+    ...AMINO_ACID_ORDER.map((acid) => [acid, aaFrequency[acid] ?? 0]),
+  ];
+
+  return rows
+    .map((row) => row.map((value) => makeCsvValue(value)).join(","))
+    .join("\n");
+}
+
 async function readTextFile(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -109,6 +161,20 @@ export default function App() {
   const sequenceLength = result?.analysis?.length;
   const invalidResidues = result?.analysis?.invalid_residues || [];
 
+  function exportJsonReport() {
+    if (!result) {
+      return;
+    }
+    downloadFile(JSON.stringify(result, null, 2), "sequenceview-report.json", "application/json;charset=utf-8");
+  }
+
+  function exportCsvReport() {
+    if (!result) {
+      return;
+    }
+    downloadFile(buildReportCsv(result), "sequenceview-report.csv", "text/csv;charset=utf-8");
+  }
+
   return (
     <div className="page-shell">
       <div className="ambient-glow ambient-glow-left" />
@@ -171,6 +237,18 @@ export default function App() {
               <p>Sequence Length</p>
               <h2>{typeof sequenceLength === "number" ? sequenceLength : "-"}</h2>
               <span>residues</span>
+            </article>
+
+            <article className="panel wide-card">
+              <h3>Report Export</h3>
+              <div className="row-actions">
+                <button type="button" onClick={exportJsonReport}>
+                  Download JSON
+                </button>
+                <button type="button" onClick={exportCsvReport}>
+                  Download CSV
+                </button>
+              </div>
             </article>
 
             <article className="panel wide-card">

@@ -8,7 +8,7 @@ from typing import Any
 if __package__ in {None, ""}:
     sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_from_directory
 
 from sequenceview.model import ProteinModelService, clean_sequence
 from sequenceview.sequence_analysis import analyze_sequence, find_invalid_residues, normalize_sequence, sanitize_for_analysis
@@ -16,8 +16,11 @@ from sequenceview.sequence_analysis import analyze_sequence, find_invalid_residu
 
 def create_app() -> Flask:
     app = Flask(__name__)
+    project_root = Path(__file__).resolve().parents[2]
+    frontend_dist = Path(os.getenv("SEQUENCEVIEW_FRONTEND_DIST", project_root / "frontend" / "dist"))
 
-    checkpoint_path = os.getenv("SEQUENCEVIEW_CHECKPOINT_PATH", "protein_classifier.pt")
+    checkpoint_path_raw = Path(os.getenv("SEQUENCEVIEW_CHECKPOINT_PATH", "protein_classifier.pt"))
+    checkpoint_path = checkpoint_path_raw if checkpoint_path_raw.is_absolute() else project_root / checkpoint_path_raw
     model_service = ProteinModelService(checkpoint_path=checkpoint_path)
 
     try:
@@ -81,6 +84,31 @@ def create_app() -> Flask:
             "analysis": sequence_data,
             "prediction": prediction,
         }), 200
+
+    @app.get("/")
+    def index() -> Any:
+        index_path = frontend_dist / "index.html"
+        if index_path.exists():
+            return send_from_directory(frontend_dist, "index.html")
+        return jsonify({
+            "message": "Frontend build not found. Build React app in frontend/ and retry.",
+            "expected_path": str(frontend_dist),
+        }), 404
+
+    @app.get("/<path:asset_path>")
+    def frontend_assets(asset_path: str) -> Any:
+        asset_file = frontend_dist / asset_path
+        if asset_file.exists() and asset_file.is_file():
+            return send_from_directory(frontend_dist, asset_path)
+
+        index_path = frontend_dist / "index.html"
+        if index_path.exists():
+            return send_from_directory(frontend_dist, "index.html")
+
+        return jsonify({
+            "message": "Frontend build not found. Build React app in frontend/ and retry.",
+            "expected_path": str(frontend_dist),
+        }), 404
 
     return app
 
