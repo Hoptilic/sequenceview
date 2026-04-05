@@ -50,6 +50,36 @@ PYTHONPATH=src python -m sequenceview.app
 
 The API starts on `http://localhost:5000`.
 
+## Frontend (React)
+
+A React dashboard is available in [frontend/](frontend/) for interactive sequence analysis and prediction.
+
+Features:
+
+- Paste a raw sequence or FASTA text.
+- Upload `.fasta`, `.fa`, `.faa`, or `.txt` files.
+- View prediction output (`predicted function`, `confidence`, `class probabilities`).
+- Explore sequence metrics (`length`) and amino-acid distribution bars.
+
+### Run Frontend (Bun)
+
+From the project root:
+
+```bash
+cd frontend
+bun install
+bun run dev
+```
+
+The frontend runs on `http://localhost:5173` and proxies `/api` requests to Flask at `http://localhost:5000`.
+
+### Frontend Build
+
+```bash
+cd frontend
+bun run build
+```
+
 ### Endpoints
 
 - `GET /health`

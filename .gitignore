@@ -7,3 +7,5 @@ data/
 artifacts/
 */protein_classifier.pt
 protein_classifier.pt
+frontend/node_modules/
+frontend/dist/
