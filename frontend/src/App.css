@@ -16,6 +16,10 @@
   box-sizing: border-box;
 }
 
+html {
+  overflow-x: hidden;
+}
+
 body {
   margin: 0;
   min-height: 100vh;
@@ -27,10 +31,16 @@ body {
     linear-gradient(145deg, var(--bg), var(--bg-alt));
 }
 
+#root {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
 .page-shell {
   position: relative;
-  min-height: 100vh;
-  overflow-x: hidden;
+  overflow: visible;
+  flex: 1;
 }
 
 .ambient-glow {
@@ -38,9 +48,9 @@ body {
   width: 340px;
   height: 340px;
   border-radius: 999px;
-  filter: blur(42px);
+  filter: blur(24px);
   pointer-events: none;
-  opacity: 0.35;
+  opacity: 0.22;
 }
 
 .ambient-glow-left {
@@ -67,11 +77,9 @@ body {
 .panel {
   background: var(--panel);
   border: 1px solid var(--stroke);
-  backdrop-filter: blur(4px);
   border-radius: 18px;
   padding: 22px;
-  box-shadow: 0 8px 18px rgba(29, 36, 40, 0.08);
-  animation: reveal 0.45s ease;
+  box-shadow: 0 4px 12px rgba(29, 36, 40, 0.07);
 }
 
 .hero-panel h1 {
@@ -107,11 +115,13 @@ textarea {
   width: 100%;
   border: 1px solid var(--stroke);
   border-radius: 12px;
-  resize: vertical;
+  resize: none;
   padding: 12px;
   font-size: 0.98rem;
   font-family: "IBM Plex Mono", monospace;
   background: rgba(255, 255, 255, 0.82);
+  min-height: 180px;
+  overflow-y: hidden;
 }
 
 textarea:focus {
@@ -207,6 +217,37 @@ button:hover {
 .wide-card h3,
 .full-card h3 {
   margin-top: 0;
+}
+
+.stats-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+}
+
+.stat-item {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border-radius: 12px;
+  border: 1px solid var(--stroke);
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.stat-item span {
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.stat-item strong {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.97rem;
+}
+
+.property-note {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: 0.92rem;
 }
 
 .full-card {
