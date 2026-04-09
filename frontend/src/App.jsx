@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 const AMINO_ACID_ORDER = "ACDEFGHIKLMNPQRSTVWY".split("");
 
@@ -15,6 +15,16 @@ function normalizeFrequencies(frequencyMap) {
 
 function formatPercent(value) {
   return `${(value * 100).toFixed(1)}%`;
+}
+
+function formatNumber(value, decimals = 3) {
+  return typeof value === "number" && Number.isFinite(value) ? value.toFixed(decimals) : "-";
+}
+
+function formatInteger(value) {
+  return typeof value === "number" && Number.isFinite(value)
+    ? new Intl.NumberFormat().format(Math.round(value))
+    : "-";
 }
 
 function downloadFile(content, filename, mimeType) {
@@ -84,6 +94,23 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState(null);
+  const sequenceInputRef = useRef(null);
+
+  useEffect(() => {
+    const textarea = sequenceInputRef.current;
+    if (!textarea) {
+      return;
+    }
+
+    const initialScrollY = window.scrollY;
+    textarea.style.height = "auto";
+    const nextHeight = Math.max(textarea.scrollHeight + 2, 180);
+    textarea.style.height = `${nextHeight}px`;
+
+    if (window.scrollY !== initialScrollY) {
+      window.scrollTo({ top: initialScrollY, left: 0, behavior: "auto" });
+    }
+  }, [sequenceInput]);
 
   const aminoBars = useMemo(() => {
     if (!result?.analysis?.amino_acid_frequency) {
@@ -158,8 +185,20 @@ export default function App() {
 
   const predictedClass = result?.prediction?.class_name || "-";
   const confidence = result?.prediction?.confidence;
+  const confidenceThreshold = result?.prediction?.confidence_threshold;
   const sequenceLength = result?.analysis?.length;
+  const molecularWeight = result?.analysis?.molecular_weight;
+  const isoelectricPoint = result?.analysis?.isoelectric_point;
+  const instabilityIndex = result?.analysis?.instability_index;
+  const gravy = result?.analysis?.gravy;
+  const aromaticity = result?.analysis?.aromaticity;
+  const residueCount = result?.analysis?.analysis_sequence?.length;
   const invalidResidues = result?.analysis?.invalid_residues || [];
+  const averageResidueMass =
+    typeof molecularWeight === "number" && typeof residueCount === "number" && residueCount > 0
+      ? molecularWeight / residueCount
+      : null;
+  const isLikelyStable = typeof instabilityIndex === "number" ? instabilityIndex < 40 : null;
 
   function exportJsonReport() {
     if (!result) {
@@ -196,6 +235,7 @@ export default function App() {
               Sequence Input
             </label>
             <textarea
+              ref={sequenceInputRef}
               id="sequenceInput"
               value={sequenceInput}
               onChange={(event) => setSequenceInput(event.target.value)}
@@ -237,6 +277,51 @@ export default function App() {
               <p>Sequence Length</p>
               <h2>{typeof sequenceLength === "number" ? sequenceLength : "-"}</h2>
               <span>residues</span>
+            </article>
+
+            <article className="panel wide-card">
+              <h3>Sequence Properties</h3>
+              <div className="stats-grid">
+                <div className="stat-item">
+                  <span>Molecular Weight</span>
+                  <strong>{formatNumber(molecularWeight, 2)} Da</strong>
+                </div>
+                <div className="stat-item">
+                  <span>Isoelectric Point (pI)</span>
+                  <strong>{formatNumber(isoelectricPoint, 3)}</strong>
+                </div>
+                <div className="stat-item">
+                  <span>Instability Index</span>
+                  <strong>{formatNumber(instabilityIndex, 3)}</strong>
+                </div>
+                <div className="stat-item">
+                  <span>GRAVY</span>
+                  <strong>{formatNumber(gravy, 3)}</strong>
+                </div>
+                <div className="stat-item">
+                  <span>Aromaticity</span>
+                  <strong>{formatNumber(aromaticity, 3)}</strong>
+                </div>
+                <div className="stat-item">
+                  <span>Residues Analyzed</span>
+                  <strong>{formatInteger(residueCount)}</strong>
+                </div>
+                <div className="stat-item">
+                  <span>Average Residue Mass</span>
+                  <strong>{averageResidueMass ? `${formatNumber(averageResidueMass, 2)} Da` : "-"}</strong>
+                </div>
+                <div className="stat-item">
+                  <span>Confidence Threshold</span>
+                  <strong>{typeof confidenceThreshold === "number" ? formatPercent(confidenceThreshold) : "-"}</strong>
+                </div>
+              </div>
+              {isLikelyStable !== null ? (
+                <p className="property-note">
+                  {isLikelyStable
+                    ? "This protein is likely stable (instability index below 40)."
+                    : "This protein may be unstable (instability index at or above 40)."}
+                </p>
+              ) : null}
             </article>
 
             <article className="panel wide-card">
