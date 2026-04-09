@@ -1,8 +1,8 @@
-# Sequenceview: Neural-Network Protein Sequence Analysis
+# SequenceView: Neural-Network Protein Sequence Analysis
 
 ## Overview
 
-SequenceView is a full-stack bioinformatics app designed to analyse and classify protein sequences. It combines a custom-trained PyTorch Bidirectional GRU (BiGRU) model for function predictions (Hydrolase EC 1.x vs Oxidoreductase EC 3.x) with a modern React frontend for ease of use
+SequenceView is a full-stack bioinformatics app designed to analyse and classify protein sequences. It combines a custom-trained PyTorch Bidirectional GRU (BiGRU) model for function predictions (Hydrolase EC 3.* vs Oxidoreductase EC 1.*) with a modern React frontend for ease of use.
 
 ![SequenceView Import](./assets/dashboard_input.png)
 ![SequenceView Report](./assets/dashboard_report.png)
@@ -12,7 +12,7 @@ SequenceView is a full-stack bioinformatics app designed to analyse and classify
 This app does a couple cool things out of the box:
 
 1. A neural network predicts protein functions using a PyTorch BiGRU model trained on reviewed UniProt entries
-2. Leverages biopython to do a biochemical analysis, calculating molecular weight, isoelectric point (pl), GRAVY, and instability index
+2. Leverages Biopython to do a biochemical analysis, calculating molecular weight, isoelectric point (pI), GRAVY, and instability index
 3. A responsive React frontend featuring sequence validation, amino acid frequency visualization, and FASTA file processing
 4. Built-in data export capability to export results to CSV/JSON formats
 
@@ -34,7 +34,7 @@ This project includes a Flask backend in [src/sequenceview/app.py](src/sequencev
 3. Runs inference with the trained PyTorch classifier.
 4. Returns analysis + prediction JSON for frontend consumption.
 
-Currently, it is very powerful with interfacing with the model, using Biopython to infer molecular weight, residues, isoelectric point etc. 
+Currently, it is very powerful with interfacing with the model, using Biopython to infer molecular weight, residues, isoelectric point, GRAVY and other relevant biochemical elements.
 
 ### Backend Files
 
