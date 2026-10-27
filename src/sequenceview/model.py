@@ -11,6 +11,7 @@ AA_ALPHABET = "ACDEFGHIKLMNPQRSTVWY"
 AMINO_ACID_TO_INDEX = {amino_acid: index + 1 for index, amino_acid in enumerate(AA_ALPHABET)}
 UNKNOWN_INDEX = len(AMINO_ACID_TO_INDEX) + 1
 PAD_INDEX = 0
+CLASS_NAMES = ("hydrolase", "oxidoreductase")
 
 
 class ProteinClassifier(nn.Module):
@@ -70,7 +71,7 @@ class ProteinModelService:
         if not self.checkpoint_path.exists():
             raise FileNotFoundError(f"Checkpoint not found: {self.checkpoint_path}")
 
-        checkpoint = torch.load(self.checkpoint_path, map_location=self.device)
+        checkpoint = torch.load(self.checkpoint_path, map_location=self.device, weights_only=True)
         vocab_size = int(checkpoint.get("vocab_size", len(AMINO_ACID_TO_INDEX) + 2))
         self.max_length = int(checkpoint.get("max_length", 768))
         self.metadata = dict(checkpoint.get("metadata", {}))
@@ -92,7 +93,7 @@ class ProteinModelService:
             probabilities = torch.softmax(self.model(input_tensor), dim=1)[0].cpu()
 
         predicted_index = int(probabilities.argmax().item())
-        predicted_class = "oxidoreductase" if predicted_index == 1 else "hydrolase"
+        predicted_class = CLASS_NAMES[predicted_index]
         confidence = float(probabilities[predicted_index].item())
         hydrolase_probability = float(probabilities[0].item())
         oxidoreductase_probability = float(probabilities[1].item())

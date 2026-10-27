@@ -2,14 +2,14 @@
 
 ## Overview
 
-SequenceView is a full-stack bioinformatics app designed to analyse and classify protein sequences. It combines a custom-trained PyTorch Bidirectional GRU (BiGRU) model for function predictions (Hydrolase EC 3.* vs Oxidoreductase EC 1.*) with a modern React frontend for ease of use.
+SequenceView is a full-stack bioinformatics app that analyses and classifies protein sequences. It combines a custom-trained PyTorch Bidirectional GRU (BiGRU) model for function predictions (Hydrolase EC 3.* vs Oxidoreductase EC 1.*) with a React frontend.
 
 ![SequenceView Import](./assets/dashboard_input.png)
 ![SequenceView Report](./assets/dashboard_report.png)
 
 ## Features
 
-This app does a couple cool things out of the box:
+Key features:
 
 1. A neural network predicts protein functions using a PyTorch BiGRU model trained on reviewed UniProt entries
 2. Leverages Biopython to do a biochemical analysis, calculating molecular weight, isoelectric point (pI), GRAVY, and instability index
@@ -33,8 +33,6 @@ This project includes a Flask backend in [src/sequenceview/app.py](src/sequencev
 2. Uses Biopython to parse/analyze it (molecular weight, amino acid frequency, and related protein properties).
 3. Runs inference with the trained PyTorch classifier.
 4. Returns analysis + prediction JSON for frontend consumption.
-
-Currently, it is very powerful with interfacing with the model, using Biopython to infer molecular weight, residues, isoelectric point, GRAVY and other relevant biochemical elements.
 
 ### Backend Files
 
@@ -66,7 +64,7 @@ If omitted, the backend defaults to `protein_classifier.pt` in the project root.
 PYTHONPATH=src python -m sequenceview.app
 ```
 
-The API starts on `http://localhost:5000`.
+The API starts on `http://localhost:5000`. Set `HOST` to change the bind address and `FLASK_DEBUG=1` to enable debug mode.
 
 ## Frontend (React)
 
@@ -132,7 +130,7 @@ After an analysis is complete, the dashboard can export results as:
 
 ### Confidence Handling
 
-The classifier now marks low-confidence predictions as `uncertain` instead of forcing a hard class.
+The classifier marks low-confidence predictions as `uncertain` instead of forcing a hard class.
 
 - `prediction.class_name` is `uncertain` when confidence is below threshold.
 - `prediction.predicted_class` still shows the top raw class.
@@ -161,6 +159,6 @@ The notebook does everything end-to-end:
 
 ## Notes
 
-- This is a practical baseline for experimentation, not a production biology model.
+- This is a baseline model for experimentation, not a production biology model.
 - Labels are annotation-derived from UniProt queries and may include noise.
 - If you change class counts or split parameters, rerun the training cell to regenerate cache and metrics.

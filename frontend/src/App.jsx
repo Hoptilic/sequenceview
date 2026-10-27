@@ -239,7 +239,7 @@ export default function App() {
               id="sequenceInput"
               value={sequenceInput}
               onChange={(event) => setSequenceInput(event.target.value)}
-              placeholder=">example_sequence\nMKTFFVILV..."
+              placeholder={">example_sequence\nMKTFFVILV..."}
               rows={9}
             />
 
@@ -269,7 +269,7 @@ export default function App() {
           <section className="dashboard-grid">
             <article className="panel metric-card">
               <p>Predicted Function</p>
-              <h2>{predictedClass.replace("_", " ")}</h2>
+              <h2>{predictedClass}</h2>
               {typeof confidence === "number" ? <span>{formatPercent(confidence)} confidence</span> : null}
             </article>
 
