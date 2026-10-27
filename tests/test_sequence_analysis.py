@@ -32,6 +32,8 @@ def test_analysis_fields(lysozyme):
     assert result["length"] == len(lysozyme)
     assert result["molecular_weight"] == pytest.approx(14313.1, abs=1.0)
     assert sum(result["amino_acid_counts"].values()) == len(lysozyme)
+    assert sum(result["amino_acid_frequency"].values()) == pytest.approx(1.0, abs=1e-4)
+    assert result["amino_acid_frequency"]["C"] == pytest.approx(lysozyme.count("C") / len(lysozyme), abs=1e-6)
     assert 0 < sum(result["secondary_structure_fraction"].values()) <= 1.0 + 1e-3
     assert len(result["hydropathy_profile"]["values"]) == len(lysozyme) - 8
     assert result["charge_curve"][0][0] < result["charge_curve"][-1][0]

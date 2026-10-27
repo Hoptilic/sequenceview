@@ -13,6 +13,8 @@
   --res-polar: #1f7a5a;
   --res-positive: #1a4fa0;
   --res-negative: #b3261e;
+  --attr-pos: #1a4fa0;
+  --attr-neg: #c2571a;
   --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
 }
 
@@ -31,6 +33,8 @@
     --res-polar: #5cc9a0;
     --res-positive: #7fb0f0;
     --res-negative: #ff8a80;
+    --attr-pos: #6fa3f5;
+    --attr-neg: #f0904a;
   }
 }
 
@@ -248,8 +252,8 @@ table.data td.num {
   text-align: left;
 }
 
-.data-compact td.num,
-.data-compact th.num {
+table.data-compact td.num,
+table.data-compact th.num {
   text-align: right;
 }
 
@@ -407,5 +411,288 @@ table.data td.num {
   .prob-row .track {
     grid-column: 1 / -1;
     grid-row: 2;
+  }
+}
+
+.tabs {
+  display: flex;
+  gap: 4px;
+  margin: 12px 0 -14px;
+}
+
+.tab {
+  padding: 5px 14px;
+  font: inherit;
+  color: var(--muted);
+  background: none;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: 2px 2px 0 0;
+  cursor: pointer;
+}
+
+.tab.active {
+  color: var(--ink);
+  font-weight: 600;
+  background: var(--bg);
+  border-color: var(--ink);
+  position: relative;
+  top: 1px;
+}
+
+.link.active {
+  color: var(--ink);
+  font-weight: 600;
+  text-decoration: underline;
+}
+
+.link:disabled {
+  color: var(--muted);
+  cursor: default;
+  text-decoration: none;
+}
+
+input[type="text"],
+select {
+  font: inherit;
+  color: var(--ink);
+  background: var(--bg);
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  padding: 3px 8px;
+}
+
+input[type="text"]:focus,
+select:focus {
+  outline: 2px solid var(--link);
+  outline-offset: 0;
+}
+
+.inline-label {
+  font-size: 0.88rem;
+  color: var(--muted);
+}
+
+.note {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+td.note {
+  margin: 0;
+}
+
+.stamp {
+  font-family: var(--mono);
+  font-size: 0.78rem;
+}
+
+.plain-list {
+  margin: 0;
+  padding-left: 1.2em;
+  font-size: 0.92rem;
+}
+
+.plain-list li + li {
+  margin-top: 4px;
+}
+
+.notice-block {
+  border-left: 3px solid var(--b);
+  padding-left: 12px;
+}
+
+.wrap {
+  word-break: break-all;
+  font-size: 0.78rem;
+}
+
+.table-scroll {
+  overflow-x: auto;
+}
+
+table.batch th,
+table.batch td {
+  white-space: nowrap;
+}
+
+table.batch td.num,
+table.batch th.num {
+  text-align: right;
+}
+
+.sort {
+  padding: 0;
+  font: inherit;
+  font-weight: 600;
+  color: inherit;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.clickable {
+  cursor: pointer;
+}
+
+.clickable:hover,
+.clickable.selected {
+  background: var(--fill);
+}
+
+.clip {
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.row-link {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: left;
+}
+
+.error-cell {
+  color: var(--danger);
+  white-space: normal !important;
+}
+
+.confusion th,
+.confusion td {
+  white-space: nowrap;
+}
+
+.plots {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.plots figure {
+  margin: 0;
+}
+
+.plots figcaption {
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.plot {
+  width: 100%;
+  height: auto;
+}
+
+.plot-grid {
+  stroke: var(--rule);
+  stroke-width: 0.5;
+}
+
+.plot-zero {
+  stroke: var(--muted);
+  stroke-width: 0.8;
+}
+
+.plot-line {
+  fill: none;
+  stroke: var(--link);
+  stroke-width: 1.4;
+  stroke-linejoin: round;
+}
+
+.plot-marker {
+  stroke: var(--attr-neg);
+  stroke-dasharray: 3 3;
+  stroke-width: 1;
+}
+
+.plot-tick,
+.plot-axis {
+  fill: var(--muted);
+  font-size: 9px;
+}
+
+.strip {
+  display: block;
+  width: 100%;
+  height: 22px;
+  margin-bottom: 10px;
+  background: var(--fill);
+  border: 1px solid var(--rule);
+}
+
+.strip .attr-pos {
+  fill: var(--attr-pos);
+  fill-opacity: var(--w);
+}
+
+.strip .attr-neg {
+  fill: var(--attr-neg);
+  fill-opacity: var(--w);
+}
+
+span.attr-pos,
+span.attr-neg {
+  color: var(--ink);
+}
+
+span.attr-pos {
+  background: color-mix(in srgb, var(--attr-pos) calc(var(--w) * 80%), transparent);
+}
+
+span.attr-neg {
+  background: color-mix(in srgb, var(--attr-neg) calc(var(--w) * 80%), transparent);
+}
+
+.res-unknown {
+  color: var(--muted);
+}
+
+.unseen {
+  opacity: 0.4;
+}
+
+.motif {
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+  font-weight: 700;
+}
+
+.motif-legend {
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+}
+
+.legend-swatch {
+  padding: 0 6px;
+}
+
+.motif-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  font-size: 0.9rem;
+}
+
+.motif-row input {
+  flex: 1 1 240px;
+  font-family: var(--mono);
+  font-size: 0.85rem;
+}
+
+.motif-row .error {
+  margin: 0;
+}
+
+@media (max-width: 640px) {
+  .plots {
+    grid-template-columns: 1fr;
   }
 }

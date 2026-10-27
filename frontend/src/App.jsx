@@ -1,120 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-const AMINO_ACID_ORDER = "ACDEFGHIKLMNPQRSTVWY".split("");
-
-const RESIDUE_GROUPS = {
-  nonpolar: "AVLIMFWPG",
-  polar: "STCYNQ",
-  positive: "KRH",
-  negative: "DE",
-};
-
-const GROUP_LABELS = {
-  nonpolar: "Nonpolar",
-  polar: "Polar",
-  positive: "Basic",
-  negative: "Acidic",
-};
+import BatchTable from "./components/BatchTable.jsx";
+import Detail from "./components/Detail.jsx";
+import ModelPanel from "./components/ModelPanel.jsx";
+import { requestJson } from "./lib/api.js";
+import { parseFastaRecords } from "./lib/fasta.js";
+import { downloadFile, formatInteger } from "./lib/format.js";
+import { buildBatchCsv } from "./lib/report.js";
+import { decodeSequenceHash, encodeSequenceHash } from "./lib/share.js";
 
 const EXAMPLE_SEQUENCE = `>sp|P00698|LYSC_CHICK Lysozyme C
 KVFGRCELAAAMKRHGLDNYRGYSLGNWVCAAKFESNFNTQATNRNTDGSTDYGILQINSRWWCNDGRTPGSRNLCNIPCSALLSSDITASVNCAKKIVSDGNGMNAWVAWRNRCKGTDVQAWIRGCRL`;
 
-function residueGroup(acid) {
-  return Object.keys(RESIDUE_GROUPS).find((group) => RESIDUE_GROUPS[group].includes(acid)) || "nonpolar";
-}
-
-function chunkSequence(sequence, blockSize = 10, blocksPerLine = 6) {
-  const lineSize = blockSize * blocksPerLine;
-  const lines = [];
-  for (let start = 0; start < sequence.length; start += lineSize) {
-    const line = sequence.slice(start, start + lineSize);
-    const blocks = [];
-    for (let offset = 0; offset < line.length; offset += blockSize) {
-      blocks.push(line.slice(offset, offset + blockSize));
-    }
-    lines.push({ start: start + 1, blocks });
-  }
-  return lines;
-}
-
-function normalizeFrequencies(frequencyMap) {
-  const values = Object.values(frequencyMap || {});
-  const maxValue = values.length ? Math.max(...values) : 0;
-  const divideBy = maxValue > 1 ? 100 : 1;
-
-  return AMINO_ACID_ORDER.map((acid) => ({
-    acid,
-    value: Number(frequencyMap?.[acid] || 0) / divideBy,
-  }));
-}
-
-function formatPercent(value) {
-  return `${(value * 100).toFixed(1)}%`;
-}
-
-function formatNumber(value, decimals = 3) {
-  return typeof value === "number" && Number.isFinite(value) ? value.toFixed(decimals) : "-";
-}
-
-function formatInteger(value) {
-  return typeof value === "number" && Number.isFinite(value)
-    ? new Intl.NumberFormat().format(Math.round(value))
-    : "-";
-}
-
-function downloadFile(content, filename, mimeType) {
-  const blob = new Blob([content], { type: mimeType });
-  const url = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = url;
-  anchor.download = filename;
-  document.body.appendChild(anchor);
-  anchor.click();
-  anchor.remove();
-  URL.revokeObjectURL(url);
-}
-
-function makeCsvValue(value) {
-  const text = String(value ?? "");
-  if (text.includes(",") || text.includes("\n") || text.includes('"')) {
-    return `"${text.replaceAll('"', '""')}"`;
-  }
-  return text;
-}
-
-function buildReportCsv(result) {
-  const prediction = result?.prediction || {};
-  const analysis = result?.analysis || {};
-  const probabilities = prediction.probabilities || {};
-  const aaFrequency = analysis.amino_acid_frequency || {};
-
-  const rows = [
-    ["field", "value"],
-    ["predicted_function", prediction.class_name || ""],
-    ["predicted_top_class", prediction.predicted_class || ""],
-    ["confidence", prediction.confidence ?? ""],
-    ["confidence_threshold", prediction.confidence_threshold ?? ""],
-    ["is_uncertain", prediction.is_uncertain ?? ""],
-    ["sequence_length", analysis.length ?? ""],
-    ["molecular_weight", analysis.molecular_weight ?? ""],
-    ["isoelectric_point", analysis.isoelectric_point ?? ""],
-    ["aromaticity", analysis.aromaticity ?? ""],
-    ["instability_index", analysis.instability_index ?? ""],
-    ["gravy", analysis.gravy ?? ""],
-    ["hydrolase_probability", probabilities.hydrolase ?? ""],
-    ["oxidoreductase_probability", probabilities.oxidoreductase ?? ""],
-    ["invalid_residues", (analysis.invalid_residues || []).join(";")],
-    [],
-    ["amino_acid", "frequency_fraction"],
-    ...AMINO_ACID_ORDER.map((acid) => [acid, aaFrequency[acid] ?? 0]),
-  ];
-
-  return rows
-    .map((row) => row.map((value) => makeCsvValue(value)).join(","))
-    .join("\n");
-}
-
-async function readTextFile(file) {
+function readTextFile(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => resolve(String(reader.result || ""));
@@ -124,71 +22,98 @@ async function readTextFile(file) {
 }
 
 export default function App() {
+  const [tab, setTab] = useState("analyse");
   const [sequenceInput, setSequenceInput] = useState("");
   const [filename, setFilename] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
-  const [result, setResult] = useState(null);
+  const [detail, setDetail] = useState(null);
+  const [batch, setBatch] = useState(null);
+  const [selected, setSelected] = useState(null);
   const [dragging, setDragging] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [shareState, setShareState] = useState("");
   const sequenceInputRef = useRef(null);
   const resultsRef = useRef(null);
 
+  const records = useMemo(() => parseFastaRecords(sequenceInput), [sequenceInput]);
+  const residueTotal = useMemo(() => records.reduce((total, record) => total + record.sequence.length, 0), [records]);
+
   useEffect(() => {
     const textarea = sequenceInputRef.current;
-    if (!textarea) {
-      return;
+    if (textarea) {
+      textarea.style.height = "auto";
+      textarea.style.height = `${Math.min(Math.max(textarea.scrollHeight + 2, 160), 420)}px`;
     }
-    textarea.style.height = "auto";
-    textarea.style.height = `${Math.min(Math.max(textarea.scrollHeight + 2, 160), 420)}px`;
-  }, [sequenceInput]);
+  }, [sequenceInput, tab]);
 
   useEffect(() => {
-    if (result) {
-      resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    const shared = decodeSequenceHash(window.location.hash);
+    if (shared) {
+      setSequenceInput(shared);
+      run(shared);
     }
-  }, [result]);
+    // Only runs once on load to restore a shared link.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
-  const inputStats = useMemo(() => {
-    const residues = sequenceInput
-      .split("\n")
-      .filter((line) => !line.startsWith(">"))
-      .join("")
-      .replace(/\s/g, "");
-    const headers = sequenceInput.split("\n").filter((line) => line.startsWith(">")).length;
-    return { residues: residues.length, headers };
-  }, [sequenceInput]);
+  function scrollToResults() {
+    setTimeout(() => resultsRef.current?.scrollIntoView({ block: "start" }), 0);
+  }
 
-  const aminoBars = useMemo(() => {
-    if (!result?.analysis?.amino_acid_frequency) {
-      return [];
+  async function predictOne(text) {
+    return requestJson("/api/predict", { sequence: text });
+  }
+
+  async function run(text = sequenceInput) {
+    const parsed = parseFastaRecords(text);
+    if (!parsed.length) {
+      setError("Paste a sequence or upload a FASTA file first.");
+      return;
     }
-    return normalizeFrequencies(result.analysis.amino_acid_frequency);
-  }, [result]);
 
-  const groupTotals = useMemo(() => {
-    const totals = { nonpolar: 0, polar: 0, positive: 0, negative: 0 };
-    aminoBars.forEach((item) => {
-      totals[residueGroup(item.acid)] += item.value;
-    });
-    return totals;
-  }, [aminoBars]);
+    setLoading(true);
+    setError("");
+    setShareState("");
+    setSelected(null);
 
-  const probabilities = useMemo(() => {
-    const probs = result?.prediction?.probabilities;
-    if (!probs) {
-      return [];
+    try {
+      if (parsed.length === 1) {
+        setBatch(null);
+        setDetail(await predictOne(text));
+      } else {
+        const data = await requestJson("/api/predict/batch", { sequence: text });
+        setDetail(null);
+        setBatch(data);
+      }
+      scrollToResults();
+    } catch (requestError) {
+      setDetail(null);
+      setBatch(null);
+      setError(requestError.message);
+    } finally {
+      setLoading(false);
     }
-    return [
-      { label: "Hydrolase", ec: "EC 3.*", value: Number(probs.hydrolase || 0), tone: "a" },
-      { label: "Oxidoreductase", ec: "EC 1.*", value: Number(probs.oxidoreductase || 0), tone: "b" },
-    ];
-  }, [result]);
+  }
 
-  const sequenceLines = useMemo(
-    () => chunkSequence(result?.analysis?.normalized_sequence || ""),
-    [result],
-  );
+  async function openRecord(index) {
+    const row = batch.results.find((item) => item.index === index);
+    if (!row || row.error) {
+      return;
+    }
+
+    setLoading(true);
+    setError("");
+    setShareState("");
+    try {
+      setDetail(await predictOne(`>${row.id}\n${row.sequence}`));
+      setSelected(index);
+      scrollToResults();
+    } catch (requestError) {
+      setError(requestError.message);
+    } finally {
+      setLoading(false);
+    }
+  }
 
   function loadText(content, name) {
     setSequenceInput(content);
@@ -225,312 +150,154 @@ export default function App() {
     setSequenceInput("");
     setFilename("");
     setError("");
-    setResult(null);
+    setDetail(null);
+    setBatch(null);
+    setSelected(null);
+    window.history.replaceState(null, "", window.location.pathname + window.location.search);
   }
 
-  async function handleAnalyze(event) {
-    event.preventDefault();
-
-    if (!sequenceInput.trim()) {
-      setError("Paste a sequence or upload a FASTA file first.");
+  async function handleShare() {
+    const text = detail ? `>${detail.input.id}\n${detail.input.sequence}` : sequenceInput;
+    const hash = encodeSequenceHash(text);
+    if (!hash) {
+      setShareState("too-long");
       return;
     }
 
-    setLoading(true);
-    setError("");
-
+    window.history.replaceState(null, "", `#${hash}`);
     try {
-      const response = await fetch("/api/predict", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sequence: sequenceInput }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data?.error || "Prediction failed.");
-      }
-
-      setResult(data);
-    } catch (predictionError) {
-      setResult(null);
-      setError(predictionError.message);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function copySequence() {
-    try {
-      await navigator.clipboard.writeText(result?.analysis?.normalized_sequence || "");
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1600);
+      await navigator.clipboard.writeText(window.location.href);
+      setShareState("copied");
     } catch {
-      setError("Clipboard access was denied.");
+      setShareState("failed");
     }
   }
 
-  const prediction = result?.prediction;
-  const analysis = result?.analysis;
-  const confidence = prediction?.confidence;
-  const isUncertain = Boolean(prediction?.is_uncertain);
-  const verdict = prediction?.class_name || "-";
-  const verdictTone = isUncertain ? "uncertain" : "called";
-  const residueCount = analysis?.analysis_sequence?.length;
-  const invalidResidues = analysis?.invalid_residues || [];
-  const averageResidueMass =
-    typeof analysis?.molecular_weight === "number" && residueCount > 0
-      ? analysis.molecular_weight / residueCount
-      : null;
-  const instabilityIndex = analysis?.instability_index;
-  const isLikelyStable = typeof instabilityIndex === "number" ? instabilityIndex < 40 : null;
-  const gravy = analysis?.gravy;
-
-  const stats = analysis
-    ? [
-        { label: "Molecular weight", value: `${formatNumber(analysis.molecular_weight, 2)} Da` },
-        { label: "Isoelectric point", value: formatNumber(analysis.isoelectric_point, 3) },
-        { label: "Instability index", value: formatNumber(instabilityIndex, 2), hint: isLikelyStable === null ? null : isLikelyStable ? "below 40: likely stable" : "40 or above: possibly unstable" },
-        { label: "GRAVY", value: formatNumber(gravy, 3), hint: typeof gravy === "number" ? (gravy > 0 ? "overall hydrophobic" : "overall hydrophilic") : null },
-        { label: "Aromaticity", value: formatNumber(analysis.aromaticity, 3) },
-        { label: "Residues analysed", value: formatInteger(residueCount) },
-        { label: "Avg. residue mass", value: averageResidueMass ? `${formatNumber(averageResidueMass, 2)} Da` : "-" },
-        { label: "Confidence threshold", value: typeof prediction?.confidence_threshold === "number" ? formatPercent(prediction.confidence_threshold) : "-" },
-      ]
-    : [];
-
-  function exportJsonReport() {
-    if (result) {
-      downloadFile(JSON.stringify(result, null, 2), "sequenceview-report.json", "application/json;charset=utf-8");
-    }
-  }
-
-  function exportCsvReport() {
-    if (result) {
-      downloadFile(buildReportCsv(result), "sequenceview-report.csv", "text/csv;charset=utf-8");
-    }
-  }
+  const multiple = records.length > 1;
 
   return (
     <div className="page">
       <header className="header">
         <h1>SequenceView</h1>
         <p>Hydrolase / oxidoreductase classification and basic physicochemical analysis of protein sequences.</p>
+        <nav className="tabs" aria-label="Sections">
+          <button type="button" className={tab === "analyse" ? "tab active" : "tab"} onClick={() => setTab("analyse")}>
+            Analyse
+          </button>
+          <button type="button" className={tab === "model" ? "tab active" : "tab"} onClick={() => setTab("model")}>
+            Model
+          </button>
+        </nav>
       </header>
 
       <main>
-        <section className="section">
-          <form onSubmit={handleAnalyze}>
-            <div className="field-head">
-              <label htmlFor="sequenceInput">Input sequence (plain or FASTA)</label>
-              <span className="field-tools">
-                <button type="button" className="link" onClick={() => loadText(EXAMPLE_SEQUENCE, "lysozyme-example.fasta")}>
-                  Load example
-                </button>
-                {sequenceInput ? (
-                  <button type="button" className="link" onClick={handleClear}>
-                    Clear
-                  </button>
-                ) : null}
-              </span>
-            </div>
+        {tab === "model" ? <ModelPanel /> : null}
 
-            <div
-              className={`dropzone${dragging ? " dropzone-active" : ""}`}
-              onDragOver={(event) => {
-                event.preventDefault();
-                setDragging(true);
-              }}
-              onDragLeave={() => setDragging(false)}
-              onDrop={handleDrop}
-            >
-              <textarea
-                ref={sequenceInputRef}
-                id="sequenceInput"
-                value={sequenceInput}
-                onChange={(event) => {
-                  setSequenceInput(event.target.value);
-                  setFilename("");
+        {tab === "analyse" ? (
+          <>
+            <section className="section">
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  run();
                 }}
-                placeholder={">example_sequence\nMKTFFVILV..."}
-                spellCheck={false}
-                rows={6}
-              />
-            </div>
-
-            <div className="form-footer">
-              <span className="meta">
-                {formatInteger(inputStats.residues)} characters
-                {inputStats.headers > 1 ? ` | ${inputStats.headers} FASTA records will be merged` : ""}
-                {filename ? ` | ${filename}` : ""}
-              </span>
-              <span className="actions">
-                <label className="button" htmlFor="sequenceFile">
-                  Upload file
-                </label>
-                <input
-                  id="sequenceFile"
-                  type="file"
-                  accept=".fasta,.fa,.faa,.txt"
-                  onChange={handleFileUpload}
-                  className="hidden-file-input"
-                />
-                <button type="submit" className="button button-primary" disabled={loading}>
-                  {loading ? "Running..." : "Run analysis"}
-                </button>
-              </span>
-            </div>
-
-            {error ? (
-              <p className="error" role="alert">
-                {error}
-              </p>
-            ) : null}
-          </form>
-        </section>
-
-        {result ? (
-          <div ref={resultsRef}>
-            <section className="section">
-              <h2>Prediction</h2>
-              <table className="data">
-                <tbody>
-                  <tr>
-                    <th>Call</th>
-                    <td className={`call call-${verdictTone}`}>{verdict}</td>
-                  </tr>
-                  <tr>
-                    <th>Top class</th>
-                    <td>{prediction.predicted_class}</td>
-                  </tr>
-                  <tr>
-                    <th>Confidence</th>
-                    <td>
-                      {formatPercent(confidence)} (threshold {formatPercent(prediction.confidence_threshold)})
-                    </td>
-                  </tr>
-                  <tr>
-                    <th>Margin</th>
-                    <td>{formatPercent(prediction.margin)}</td>
-                  </tr>
-                </tbody>
-              </table>
-
-              <div className="probs">
-                {probabilities.map((item) => (
-                  <div className="prob-row" key={item.label}>
-                    <span>
-                      {item.label} <small>{item.ec}</small>
-                    </span>
-                    <div className="track">
-                      <div className={`fill fill-${item.tone}`} style={{ width: `${item.value * 100}%` }} />
-                    </div>
-                    <span className="num">{formatPercent(item.value)}</span>
-                  </div>
-                ))}
-              </div>
-            </section>
-
-            <section className="section">
-              <h2>Sequence properties</h2>
-              <table className="data">
-                <tbody>
-                  {stats.map((item) => (
-                    <tr key={item.label}>
-                      <th>{item.label}</th>
-                      <td className="num">{item.value}</td>
-                      <td className="note">{item.hint || ""}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </section>
-
-            <section className="section">
-              <div className="field-head">
-                <h2>Sequence</h2>
-                <span className="field-tools">
-                  <button type="button" className="link" onClick={copySequence}>
-                    {copied ? "Copied" : "Copy"}
-                  </button>
-                </span>
-              </div>
-              <div className="legend">
-                {Object.keys(GROUP_LABELS).map((group) => (
-                  <span key={group} className={`res-${group}`}>
-                    {GROUP_LABELS[group]}
+              >
+                <div className="field-head">
+                  <label htmlFor="sequenceInput">Input sequence (plain or FASTA, multiple records allowed)</label>
+                  <span className="field-tools">
+                    <button type="button" className="link" onClick={() => loadText(EXAMPLE_SEQUENCE, "lysozyme-example.fasta")}>
+                      Load example
+                    </button>
+                    {sequenceInput ? (
+                      <button type="button" className="link" onClick={handleClear}>
+                        Clear
+                      </button>
+                    ) : null}
                   </span>
-                ))}
-              </div>
-              <div className="seq-viewer" role="region" aria-label="Annotated sequence" tabIndex={0}>
-                {sequenceLines.map((line) => (
-                  <div className="seq-line" key={line.start}>
-                    <span className="seq-index">{line.start}</span>
-                    {line.blocks.map((block, blockIndex) => (
-                      <span className="seq-block" key={blockIndex}>
-                        {block.split("").map((acid, acidIndex) => (
-                          <span key={acidIndex} className={`res-${residueGroup(acid)}`}>
-                            {acid}
-                          </span>
-                        ))}
-                      </span>
-                    ))}
-                  </div>
-                ))}
-              </div>
+                </div>
+
+                <div
+                  className={`dropzone${dragging ? " dropzone-active" : ""}`}
+                  onDragOver={(event) => {
+                    event.preventDefault();
+                    setDragging(true);
+                  }}
+                  onDragLeave={() => setDragging(false)}
+                  onDrop={handleDrop}
+                >
+                  <textarea
+                    ref={sequenceInputRef}
+                    id="sequenceInput"
+                    value={sequenceInput}
+                    onChange={(event) => {
+                      setSequenceInput(event.target.value);
+                      setFilename("");
+                    }}
+                    placeholder={">example_sequence\nMKTFFVILV..."}
+                    spellCheck={false}
+                    rows={6}
+                  />
+                </div>
+
+                <div className="form-footer">
+                  <span className="meta">
+                    {records.length} {records.length === 1 ? "record" : "records"}, {formatInteger(residueTotal)} residues
+                    {filename ? ` | ${filename}` : ""}
+                  </span>
+                  <span className="actions">
+                    <label className="button" htmlFor="sequenceFile">
+                      Upload file
+                    </label>
+                    <input
+                      id="sequenceFile"
+                      type="file"
+                      accept=".fasta,.fa,.faa,.txt"
+                      onChange={handleFileUpload}
+                      className="hidden-file-input"
+                    />
+                    <button type="submit" className="button button-primary" disabled={loading}>
+                      {loading ? "Running..." : multiple ? `Run ${records.length} records` : "Run analysis"}
+                    </button>
+                  </span>
+                </div>
+
+                {error ? (
+                  <p className="error" role="alert">
+                    {error}
+                  </p>
+                ) : null}
+              </form>
             </section>
 
-            <section className="section">
-              <h2>Composition</h2>
-              <table className="data data-compact">
-                <thead>
-                  <tr>
-                    <th>Class</th>
-                    <th className="num">Fraction</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {Object.keys(GROUP_LABELS).map((group) => (
-                    <tr key={group}>
-                      <th className={`res-${group}`}>{GROUP_LABELS[group]}</th>
-                      <td className="num">{formatPercent(groupTotals[group])}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              <div className="amino-grid">
-                {aminoBars.map((item) => (
-                  <div key={item.acid} className="amino-row">
-                    <span className={`acid res-${residueGroup(item.acid)}`}>{item.acid}</span>
-                    <div className="track">
-                      <div className={`fill fill-${residueGroup(item.acid)}`} style={{ width: `${item.value * 100}%` }} />
-                    </div>
-                    <span className="num">{formatPercent(item.value)}</span>
-                  </div>
-                ))}
-              </div>
-            </section>
+            <div ref={resultsRef}>
+              {batch ? (
+                <section className="section">
+                  <h2>Batch results</h2>
+                  <BatchTable
+                    results={batch.results}
+                    selected={selected}
+                    onSelect={openRecord}
+                    onExport={() => downloadFile(buildBatchCsv(batch.results), "sequenceview-batch.csv", "text/csv;charset=utf-8")}
+                  />
+                  <p className="note stamp">Model {batch.model.version}. Select a record for the full report.</p>
+                </section>
+              ) : null}
 
-            {invalidResidues.length ? (
-              <section className="section notice">
-                Non-standard residues ({invalidResidues.join(", ")}) were excluded from the property calculations and
-                encoded as unknown for the classifier.
-              </section>
-            ) : null}
-
-            <section className="section">
-              <h2>Export</h2>
-              <span className="actions">
-                <button type="button" className="button" onClick={exportJsonReport}>
-                  JSON
-                </button>
-                <button type="button" className="button" onClick={exportCsvReport}>
-                  CSV
-                </button>
-              </span>
-            </section>
-          </div>
+              {detail ? (
+                <>
+                  {batch ? (
+                    <section className="section">
+                      <button type="button" className="link" onClick={() => { setDetail(null); setSelected(null); }}>
+                        Close record
+                      </button>
+                      <span className="meta"> {detail.input.id}</span>
+                    </section>
+                  ) : null}
+                  <Detail key={`${detail.input.id}:${detail.analysis.length}:${detail.attribution?.scores?.[0]}`} result={detail} onShare={handleShare} shareState={shareState} />
+                </>
+              ) : null}
+            </div>
+          </>
         ) : null}
       </main>
 

@@ -93,13 +93,8 @@ def sequence_warnings(normalized: str, analysis_sequence: str, max_length: int) 
 def analyze_sequence(sequence: str) -> dict[str, Any]:
     analysis = ProteinAnalysis(sequence)
 
-    # Newer Biopython exposes this as a property rather than a method.
-    aa_percent = (
-        analysis.amino_acids_percent
-        if hasattr(analysis, "amino_acids_percent")
-        else analysis.get_amino_acids_percent()
-    )
-    aa_frequency = {aa: round(float(aa_percent.get(aa, 0.0)), 6) for aa in AA_ALPHABET}
+    counts = amino_acid_counts(sequence)
+    aa_frequency = {aa: round(counts[aa] / len(sequence), 6) for aa in AA_ALPHABET}
 
     helix, turn, sheet = analysis.secondary_structure_fraction()
     extinction_reduced, extinction_oxidized = analysis.molar_extinction_coefficient()
@@ -128,6 +123,6 @@ def analyze_sequence(sequence: str) -> dict[str, Any]:
         },
         "hydropathy_profile": {"window": HYDROPATHY_WINDOW, "values": hydropathy},
         "charge_curve": [[ph, round(float(analysis.charge_at_pH(ph)), 4)] for ph in CHARGE_CURVE_PH],
-        "amino_acid_counts": amino_acid_counts(sequence),
+        "amino_acid_counts": counts,
         "amino_acid_frequency": aa_frequency,
     }
