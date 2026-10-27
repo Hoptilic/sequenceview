@@ -2,6 +2,41 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 const AMINO_ACID_ORDER = "ACDEFGHIKLMNPQRSTVWY".split("");
 
+const RESIDUE_GROUPS = {
+  nonpolar: "AVLIMFWPG",
+  polar: "STCYNQ",
+  positive: "KRH",
+  negative: "DE",
+};
+
+const GROUP_LABELS = {
+  nonpolar: "Nonpolar",
+  polar: "Polar",
+  positive: "Basic (+)",
+  negative: "Acidic (-)",
+};
+
+const EXAMPLE_SEQUENCE = `>sp|P00698|LYSC_CHICK Lysozyme C
+KVFGRCELAAAMKRHGLDNYRGYSLGNWVCAAKFESNFNTQATNRNTDGSTDYGILQINSRWWCNDGRTPGSRNLCNIPCSALLSSDITASVNCAKKIVSDGNGMNAWVAWRNRCKGTDVQAWIRGCRL`;
+
+function residueGroup(acid) {
+  return Object.keys(RESIDUE_GROUPS).find((group) => RESIDUE_GROUPS[group].includes(acid)) || "nonpolar";
+}
+
+function chunkSequence(sequence, blockSize = 10, blocksPerLine = 6) {
+  const lineSize = blockSize * blocksPerLine;
+  const lines = [];
+  for (let start = 0; start < sequence.length; start += lineSize) {
+    const line = sequence.slice(start, start + lineSize);
+    const blocks = [];
+    for (let offset = 0; offset < line.length; offset += blockSize) {
+      blocks.push(line.slice(offset, offset + blockSize));
+    }
+    lines.push({ start: start + 1, blocks });
+  }
+  return lines;
+}
+
 function normalizeFrequencies(frequencyMap) {
   const values = Object.values(frequencyMap || {});
   const maxValue = values.length ? Math.max(...values) : 0;
@@ -94,22 +129,34 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState(null);
+  const [dragging, setDragging] = useState(false);
+  const [copied, setCopied] = useState(false);
   const sequenceInputRef = useRef(null);
+  const resultsRef = useRef(null);
 
   useEffect(() => {
     const textarea = sequenceInputRef.current;
     if (!textarea) {
       return;
     }
-
-    const initialScrollY = window.scrollY;
     textarea.style.height = "auto";
-    const nextHeight = Math.max(textarea.scrollHeight + 2, 180);
-    textarea.style.height = `${nextHeight}px`;
+    textarea.style.height = `${Math.min(Math.max(textarea.scrollHeight + 2, 160), 420)}px`;
+  }, [sequenceInput]);
 
-    if (window.scrollY !== initialScrollY) {
-      window.scrollTo({ top: initialScrollY, left: 0, behavior: "auto" });
+  useEffect(() => {
+    if (result) {
+      resultsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     }
+  }, [result]);
+
+  const inputStats = useMemo(() => {
+    const residues = sequenceInput
+      .split("\n")
+      .filter((line) => !line.startsWith(">"))
+      .join("")
+      .replace(/\s/g, "");
+    const headers = sequenceInput.split("\n").filter((line) => line.startsWith(">")).length;
+    return { residues: residues.length, headers };
   }, [sequenceInput]);
 
   const aminoBars = useMemo(() => {
@@ -119,39 +166,73 @@ export default function App() {
     return normalizeFrequencies(result.analysis.amino_acid_frequency);
   }, [result]);
 
+  const groupTotals = useMemo(() => {
+    const totals = { nonpolar: 0, polar: 0, positive: 0, negative: 0 };
+    aminoBars.forEach((item) => {
+      totals[residueGroup(item.acid)] += item.value;
+    });
+    return totals;
+  }, [aminoBars]);
+
   const probabilities = useMemo(() => {
     const probs = result?.prediction?.probabilities;
     if (!probs) {
       return [];
     }
-
     return [
-      { label: "Hydrolase", value: Number(probs.hydrolase || 0) },
-      { label: "Oxidoreductase", value: Number(probs.oxidoreductase || 0) },
+      { label: "Hydrolase", ec: "EC 3.*", value: Number(probs.hydrolase || 0), tone: "teal" },
+      { label: "Oxidoreductase", ec: "EC 1.*", value: Number(probs.oxidoreductase || 0), tone: "amber" },
     ];
   }, [result]);
 
-  async function handleFileUpload(event) {
-    const file = event.target.files?.[0];
-    if (!file) {
-      return;
-    }
+  const sequenceLines = useMemo(
+    () => chunkSequence(result?.analysis?.normalized_sequence || ""),
+    [result],
+  );
 
+  function loadText(content, name) {
+    setSequenceInput(content);
+    setFilename(name);
+    setError("");
+  }
+
+  async function readIntoInput(file) {
     try {
-      const content = await readTextFile(file);
-      setSequenceInput(content);
-      setFilename(file.name);
-      setError("");
+      loadText(await readTextFile(file), file.name);
     } catch (uploadError) {
       setError(uploadError.message);
     }
+  }
+
+  async function handleFileUpload(event) {
+    const file = event.target.files?.[0];
+    if (file) {
+      await readIntoInput(file);
+    }
+    event.target.value = "";
+  }
+
+  async function handleDrop(event) {
+    event.preventDefault();
+    setDragging(false);
+    const file = event.dataTransfer.files?.[0];
+    if (file) {
+      await readIntoInput(file);
+    }
+  }
+
+  function handleClear() {
+    setSequenceInput("");
+    setFilename("");
+    setError("");
+    setResult(null);
   }
 
   async function handleAnalyze(event) {
     event.preventDefault();
 
     if (!sequenceInput.trim()) {
-      setError("Please paste a sequence or upload a FASTA file.");
+      setError("Paste a sequence or upload a FASTA file first.");
       return;
     }
 
@@ -161,17 +242,14 @@ export default function App() {
     try {
       const response = await fetch("/api/predict", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sequence: sequenceInput }),
       });
 
       const data = await response.json();
 
       if (!response.ok) {
-        const backendError = data?.error || "Prediction failed.";
-        throw new Error(backendError);
+        throw new Error(data?.error || "Prediction failed.");
       }
 
       setResult(data);
@@ -183,184 +261,284 @@ export default function App() {
     }
   }
 
-  const predictedClass = result?.prediction?.class_name || "-";
-  const confidence = result?.prediction?.confidence;
-  const confidenceThreshold = result?.prediction?.confidence_threshold;
-  const sequenceLength = result?.analysis?.length;
-  const molecularWeight = result?.analysis?.molecular_weight;
-  const isoelectricPoint = result?.analysis?.isoelectric_point;
-  const instabilityIndex = result?.analysis?.instability_index;
-  const gravy = result?.analysis?.gravy;
-  const aromaticity = result?.analysis?.aromaticity;
-  const residueCount = result?.analysis?.analysis_sequence?.length;
-  const invalidResidues = result?.analysis?.invalid_residues || [];
+  async function copySequence() {
+    try {
+      await navigator.clipboard.writeText(result?.analysis?.normalized_sequence || "");
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1600);
+    } catch {
+      setError("Clipboard access was denied.");
+    }
+  }
+
+  const prediction = result?.prediction;
+  const analysis = result?.analysis;
+  const confidence = prediction?.confidence;
+  const isUncertain = Boolean(prediction?.is_uncertain);
+  const verdict = prediction?.class_name || "-";
+  const verdictTone = isUncertain ? "uncertain" : prediction?.predicted_class === "oxidoreductase" ? "amber" : "teal";
+  const confidencePercent = typeof confidence === "number" ? Math.round(confidence * 100) : 0;
+  const residueCount = analysis?.analysis_sequence?.length;
+  const invalidResidues = analysis?.invalid_residues || [];
   const averageResidueMass =
-    typeof molecularWeight === "number" && typeof residueCount === "number" && residueCount > 0
-      ? molecularWeight / residueCount
+    typeof analysis?.molecular_weight === "number" && residueCount > 0
+      ? analysis.molecular_weight / residueCount
       : null;
+  const instabilityIndex = analysis?.instability_index;
   const isLikelyStable = typeof instabilityIndex === "number" ? instabilityIndex < 40 : null;
+  const gravy = analysis?.gravy;
+
+  const stats = analysis
+    ? [
+        { label: "Molecular weight", value: `${formatNumber(analysis.molecular_weight, 2)} Da` },
+        { label: "Isoelectric point", value: formatNumber(analysis.isoelectric_point, 3) },
+        { label: "Instability index", value: formatNumber(instabilityIndex, 2), hint: isLikelyStable === null ? null : isLikelyStable ? "Likely stable" : "Possibly unstable", good: isLikelyStable },
+        { label: "GRAVY", value: formatNumber(gravy, 3), hint: typeof gravy === "number" ? (gravy > 0 ? "Hydrophobic" : "Hydrophilic") : null },
+        { label: "Aromaticity", value: formatNumber(analysis.aromaticity, 3) },
+        { label: "Residues analysed", value: formatInteger(residueCount) },
+        { label: "Avg. residue mass", value: averageResidueMass ? `${formatNumber(averageResidueMass, 2)} Da` : "-" },
+        { label: "Confidence threshold", value: typeof prediction?.confidence_threshold === "number" ? formatPercent(prediction.confidence_threshold) : "-" },
+      ]
+    : [];
 
   function exportJsonReport() {
-    if (!result) {
-      return;
+    if (result) {
+      downloadFile(JSON.stringify(result, null, 2), "sequenceview-report.json", "application/json;charset=utf-8");
     }
-    downloadFile(JSON.stringify(result, null, 2), "sequenceview-report.json", "application/json;charset=utf-8");
   }
 
   function exportCsvReport() {
-    if (!result) {
-      return;
+    if (result) {
+      downloadFile(buildReportCsv(result), "sequenceview-report.csv", "text/csv;charset=utf-8");
     }
-    downloadFile(buildReportCsv(result), "sequenceview-report.csv", "text/csv;charset=utf-8");
   }
 
   return (
     <div className="page-shell">
-      <div className="ambient-glow ambient-glow-left" />
-      <div className="ambient-glow ambient-glow-right" />
+      <header className="topbar">
+        <div className="brand">
+          <span className="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <path d="M6 3c0 6 12 6 12 12s-12 6-12 6" />
+              <path d="M18 3c0 6-12 6-12 12s12 6 12 6" />
+              <path d="M8 7h8M8 17h8" />
+            </svg>
+          </span>
+          <span className="brand-name">SequenceView</span>
+        </div>
+        <span className="topbar-tag">BiGRU enzyme classifier</span>
+      </header>
 
       <main className="layout">
-        <section className="panel hero-panel">
-          <p className="kicker">SequenceView</p>
-          <h1>Protein Sequence Insight Dashboard</h1>
+        <section className="hero">
+          <h1>
+            Read a protein sequence, <span className="gradient-text">predict its function.</span>
+          </h1>
           <p className="lead">
-            Paste a raw amino-acid sequence or upload a FASTA file to predict enzyme function and inspect
-            composition.
+            Classify enzymes as hydrolases or oxidoreductases and explore their biochemical profile in one view.
           </p>
         </section>
 
-        <section className="panel">
+        <section className="panel input-panel">
           <form onSubmit={handleAnalyze} className="input-form">
-            <label htmlFor="sequenceInput" className="label-title">
-              Sequence Input
-            </label>
-            <textarea
-              ref={sequenceInputRef}
-              id="sequenceInput"
-              value={sequenceInput}
-              onChange={(event) => setSequenceInput(event.target.value)}
-              placeholder={">example_sequence\nMKTFFVILV..."}
-              rows={9}
-            />
-
-            <div className="row-actions">
-              <label className="upload-button" htmlFor="sequenceFile">
-                Upload .fasta
+            <div className="input-head">
+              <label htmlFor="sequenceInput" className="label-title">
+                Sequence
               </label>
-              <input
-                id="sequenceFile"
-                type="file"
-                accept=".fasta,.fa,.faa,.txt"
-                onChange={handleFileUpload}
-                className="hidden-file-input"
-              />
-
-              <button type="submit" disabled={loading}>
-                {loading ? "Analyzing..." : "Analyze Sequence"}
-              </button>
+              <div className="input-head-actions">
+                <button type="button" className="link-button" onClick={() => loadText(EXAMPLE_SEQUENCE, "lysozyme-example.fasta")}>
+                  Load example
+                </button>
+                {sequenceInput ? (
+                  <button type="button" className="link-button" onClick={handleClear}>
+                    Clear
+                  </button>
+                ) : null}
+              </div>
             </div>
 
-            {filename ? <p className="muted">Loaded file: {filename}</p> : null}
-            {error ? <p className="error-text">{error}</p> : null}
+            <div
+              className={`dropzone${dragging ? " dropzone-active" : ""}`}
+              onDragOver={(event) => {
+                event.preventDefault();
+                setDragging(true);
+              }}
+              onDragLeave={() => setDragging(false)}
+              onDrop={handleDrop}
+            >
+              <textarea
+                ref={sequenceInputRef}
+                id="sequenceInput"
+                value={sequenceInput}
+                onChange={(event) => {
+                  setSequenceInput(event.target.value);
+                  setFilename("");
+                }}
+                placeholder={">example_sequence\nMKTFFVILV..."}
+                spellCheck={false}
+                rows={6}
+              />
+              {dragging ? <div className="drop-overlay">Drop a FASTA file to load it</div> : null}
+            </div>
+
+            <div className="input-footer">
+              <div className="input-meta">
+                <span className="chip">{formatInteger(inputStats.residues)} residues</span>
+                {inputStats.headers > 1 ? <span className="chip chip-warn">{inputStats.headers} FASTA records (merged)</span> : null}
+                {filename ? <span className="chip chip-file">{filename}</span> : null}
+              </div>
+              <div className="row-actions">
+                <label className="btn btn-secondary" htmlFor="sequenceFile">
+                  Upload FASTA
+                </label>
+                <input
+                  id="sequenceFile"
+                  type="file"
+                  accept=".fasta,.fa,.faa,.txt"
+                  onChange={handleFileUpload}
+                  className="hidden-file-input"
+                />
+                <button type="submit" className="btn btn-primary" disabled={loading}>
+                  {loading ? <span className="spinner" aria-hidden="true" /> : null}
+                  {loading ? "Analysing..." : "Analyse sequence"}
+                </button>
+              </div>
+            </div>
+
+            {error ? (
+              <p className="error-text" role="alert">
+                {error}
+              </p>
+            ) : null}
           </form>
         </section>
 
+        {loading && !result ? (
+          <section className="dashboard-grid" aria-hidden="true">
+            <div className="panel skeleton span-5" />
+            <div className="panel skeleton span-7" />
+          </section>
+        ) : null}
+
         {result ? (
-          <section className="dashboard-grid">
-            <article className="panel metric-card">
-              <p>Predicted Function</p>
-              <h2>{predictedClass}</h2>
-              {typeof confidence === "number" ? <span>{formatPercent(confidence)} confidence</span> : null}
-            </article>
-
-            <article className="panel metric-card">
-              <p>Sequence Length</p>
-              <h2>{typeof sequenceLength === "number" ? sequenceLength : "-"}</h2>
-              <span>residues</span>
-            </article>
-
-            <article className="panel wide-card">
-              <h3>Sequence Properties</h3>
-              <div className="stats-grid">
-                <div className="stat-item">
-                  <span>Molecular Weight</span>
-                  <strong>{formatNumber(molecularWeight, 2)} Da</strong>
-                </div>
-                <div className="stat-item">
-                  <span>Isoelectric Point (pI)</span>
-                  <strong>{formatNumber(isoelectricPoint, 3)}</strong>
-                </div>
-                <div className="stat-item">
-                  <span>Instability Index</span>
-                  <strong>{formatNumber(instabilityIndex, 3)}</strong>
-                </div>
-                <div className="stat-item">
-                  <span>GRAVY</span>
-                  <strong>{formatNumber(gravy, 3)}</strong>
-                </div>
-                <div className="stat-item">
-                  <span>Aromaticity</span>
-                  <strong>{formatNumber(aromaticity, 3)}</strong>
-                </div>
-                <div className="stat-item">
-                  <span>Residues Analyzed</span>
-                  <strong>{formatInteger(residueCount)}</strong>
-                </div>
-                <div className="stat-item">
-                  <span>Average Residue Mass</span>
-                  <strong>{averageResidueMass ? `${formatNumber(averageResidueMass, 2)} Da` : "-"}</strong>
-                </div>
-                <div className="stat-item">
-                  <span>Confidence Threshold</span>
-                  <strong>{typeof confidenceThreshold === "number" ? formatPercent(confidenceThreshold) : "-"}</strong>
+          <section className="dashboard-grid" ref={resultsRef}>
+            <article className={`panel verdict-card tone-${verdictTone} span-5`}>
+              <p className="eyebrow">Predicted function</p>
+              <h2>{verdict}</h2>
+              <div className="gauge" style={{ "--value": confidencePercent }}>
+                <div className="gauge-inner">
+                  <strong>{confidencePercent}%</strong>
+                  <span>confidence</span>
                 </div>
               </div>
-              {isLikelyStable !== null ? (
-                <p className="property-note">
-                  {isLikelyStable
-                    ? "This protein is likely stable (instability index below 40)."
-                    : "This protein may be unstable (instability index at or above 40)."}
+              {isUncertain ? (
+                <p className="verdict-note">
+                  Below the {formatPercent(prediction.confidence_threshold)} threshold. Closest class: {prediction.predicted_class}.
                 </p>
-              ) : null}
+              ) : (
+                <p className="verdict-note">Margin between classes: {formatPercent(prediction.margin)}</p>
+              )}
             </article>
 
-            <article className="panel wide-card">
-              <h3>Report Export</h3>
-              <div className="row-actions">
-                <button type="button" onClick={exportJsonReport}>
-                  Download JSON
-                </button>
-                <button type="button" onClick={exportCsvReport}>
-                  Download CSV
-                </button>
+            <article className="panel span-7">
+              <div className="card-head">
+                <h3>Class probability</h3>
+                <span className="chip">{formatInteger(analysis.length)} aa</span>
               </div>
-            </article>
-
-            <article className="panel wide-card">
-              <h3>Class Probability</h3>
               <div className="bar-stack">
                 {probabilities.map((item) => (
                   <div className="bar-item" key={item.label}>
                     <div className="bar-label-line">
-                      <span>{item.label}</span>
-                      <span>{formatPercent(item.value)}</span>
+                      <span>
+                        {item.label} <em>{item.ec}</em>
+                      </span>
+                      <strong>{formatPercent(item.value)}</strong>
                     </div>
-                    <div className="bar-track">
-                      <div className="bar-fill" style={{ width: `${Math.max(3, item.value * 100)}%` }} />
+                    <div className="bar-track bar-track-lg">
+                      <div className={`bar-fill fill-${item.tone}`} style={{ width: `${Math.max(2, item.value * 100)}%` }} />
                     </div>
+                  </div>
+                ))}
+              </div>
+              <div className="export-row">
+                <button type="button" className="btn btn-secondary btn-sm" onClick={exportJsonReport}>
+                  Export JSON
+                </button>
+                <button type="button" className="btn btn-secondary btn-sm" onClick={exportCsvReport}>
+                  Export CSV
+                </button>
+              </div>
+            </article>
+
+            <article className="panel span-12">
+              <h3>Sequence properties</h3>
+              <div className="stats-grid">
+                {stats.map((item) => (
+                  <div className="stat-item" key={item.label}>
+                    <span>{item.label}</span>
+                    <strong>{item.value}</strong>
+                    {item.hint ? (
+                      <em className={item.good === true ? "hint-good" : item.good === false ? "hint-bad" : ""}>{item.hint}</em>
+                    ) : null}
                   </div>
                 ))}
               </div>
             </article>
 
-            <article className="panel full-card">
-              <h3>Amino Acid Distribution</h3>
+            <article className="panel span-12">
+              <div className="card-head">
+                <h3>Sequence viewer</h3>
+                <button type="button" className="btn btn-secondary btn-sm" onClick={copySequence}>
+                  {copied ? "Copied" : "Copy sequence"}
+                </button>
+              </div>
+              <div className="legend">
+                {Object.keys(GROUP_LABELS).map((group) => (
+                  <span key={group} className="legend-item">
+                    <i className={`dot res-${group}`} />
+                    {GROUP_LABELS[group]}
+                  </span>
+                ))}
+              </div>
+              <div className="seq-viewer" role="region" aria-label="Annotated sequence" tabIndex={0}>
+                {sequenceLines.map((line) => (
+                  <div className="seq-line" key={line.start}>
+                    <span className="seq-index">{line.start}</span>
+                    {line.blocks.map((block, blockIndex) => (
+                      <span className="seq-block" key={blockIndex}>
+                        {block.split("").map((acid, acidIndex) => (
+                          <span key={acidIndex} className={`res res-${residueGroup(acid)}`}>
+                            {acid}
+                          </span>
+                        ))}
+                      </span>
+                    ))}
+                  </div>
+                ))}
+              </div>
+            </article>
+
+            <article className="panel span-12">
+              <h3>Amino acid composition</h3>
+              <div className="group-strip" aria-label="Composition by residue class">
+                {Object.keys(GROUP_LABELS).map((group) => (
+                  <div
+                    key={group}
+                    className={`group-segment res-${group}`}
+                    style={{ flexGrow: Math.max(groupTotals[group], 0.01) }}
+                    title={`${GROUP_LABELS[group]}: ${formatPercent(groupTotals[group])}`}
+                  >
+                    <span>{GROUP_LABELS[group]}</span>
+                    <strong>{formatPercent(groupTotals[group])}</strong>
+                  </div>
+                ))}
+              </div>
               <div className="amino-grid">
                 {aminoBars.map((item) => (
                   <div key={item.acid} className="amino-row">
-                    <span className="acid-token">{item.acid}</span>
+                    <span className={`acid-token res-${residueGroup(item.acid)}`}>{item.acid}</span>
                     <div className="bar-track">
-                      <div className="bar-fill bar-fill-alt" style={{ width: `${Math.max(1, item.value * 100)}%` }} />
+                      <div className={`bar-fill fill-${residueGroup(item.acid)}`} style={{ width: `${Math.max(item.value > 0 ? 1 : 0, item.value * 100)}%` }} />
                     </div>
                     <span className="acid-value">{formatPercent(item.value)}</span>
                   </div>
@@ -369,14 +547,18 @@ export default function App() {
             </article>
 
             {invalidResidues.length ? (
-              <article className="panel full-card warning-card">
-                <h3>Invalid Residues Removed</h3>
-                <p>{invalidResidues.join(", ")}</p>
+              <article className="panel span-12 warning-card">
+                <h3>Non-standard residues removed</h3>
+                <p>
+                  {invalidResidues.join(", ")} were excluded from the analysis and replaced with an unknown token for prediction.
+                </p>
               </article>
             ) : null}
           </section>
         ) : null}
       </main>
+
+      <footer className="footer">SequenceView &middot; trained on reviewed UniProt entries &middot; for research use only</footer>
     </div>
   );
 }
