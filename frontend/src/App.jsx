@@ -12,8 +12,8 @@ const RESIDUE_GROUPS = {
 const GROUP_LABELS = {
   nonpolar: "Nonpolar",
   polar: "Polar",
-  positive: "Basic (+)",
-  negative: "Acidic (-)",
+  positive: "Basic",
+  negative: "Acidic",
 };
 
 const EXAMPLE_SEQUENCE = `>sp|P00698|LYSC_CHICK Lysozyme C
@@ -180,8 +180,8 @@ export default function App() {
       return [];
     }
     return [
-      { label: "Hydrolase", ec: "EC 3.*", value: Number(probs.hydrolase || 0), tone: "teal" },
-      { label: "Oxidoreductase", ec: "EC 1.*", value: Number(probs.oxidoreductase || 0), tone: "amber" },
+      { label: "Hydrolase", ec: "EC 3.*", value: Number(probs.hydrolase || 0), tone: "a" },
+      { label: "Oxidoreductase", ec: "EC 1.*", value: Number(probs.oxidoreductase || 0), tone: "b" },
     ];
   }, [result]);
 
@@ -276,8 +276,7 @@ export default function App() {
   const confidence = prediction?.confidence;
   const isUncertain = Boolean(prediction?.is_uncertain);
   const verdict = prediction?.class_name || "-";
-  const verdictTone = isUncertain ? "uncertain" : prediction?.predicted_class === "oxidoreductase" ? "amber" : "teal";
-  const confidencePercent = typeof confidence === "number" ? Math.round(confidence * 100) : 0;
+  const verdictTone = isUncertain ? "uncertain" : "called";
   const residueCount = analysis?.analysis_sequence?.length;
   const invalidResidues = analysis?.invalid_residues || [];
   const averageResidueMass =
@@ -292,8 +291,8 @@ export default function App() {
     ? [
         { label: "Molecular weight", value: `${formatNumber(analysis.molecular_weight, 2)} Da` },
         { label: "Isoelectric point", value: formatNumber(analysis.isoelectric_point, 3) },
-        { label: "Instability index", value: formatNumber(instabilityIndex, 2), hint: isLikelyStable === null ? null : isLikelyStable ? "Likely stable" : "Possibly unstable", good: isLikelyStable },
-        { label: "GRAVY", value: formatNumber(gravy, 3), hint: typeof gravy === "number" ? (gravy > 0 ? "Hydrophobic" : "Hydrophilic") : null },
+        { label: "Instability index", value: formatNumber(instabilityIndex, 2), hint: isLikelyStable === null ? null : isLikelyStable ? "below 40: likely stable" : "40 or above: possibly unstable" },
+        { label: "GRAVY", value: formatNumber(gravy, 3), hint: typeof gravy === "number" ? (gravy > 0 ? "overall hydrophobic" : "overall hydrophilic") : null },
         { label: "Aromaticity", value: formatNumber(analysis.aromaticity, 3) },
         { label: "Residues analysed", value: formatInteger(residueCount) },
         { label: "Avg. residue mass", value: averageResidueMass ? `${formatNumber(averageResidueMass, 2)} Da` : "-" },
@@ -314,47 +313,27 @@ export default function App() {
   }
 
   return (
-    <div className="page-shell">
-      <header className="topbar">
-        <div className="brand">
-          <span className="brand-mark" aria-hidden="true">
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-              <path d="M6 3c0 6 12 6 12 12s-12 6-12 6" />
-              <path d="M18 3c0 6-12 6-12 12s12 6 12 6" />
-              <path d="M8 7h8M8 17h8" />
-            </svg>
-          </span>
-          <span className="brand-name">SequenceView</span>
-        </div>
-        <span className="topbar-tag">BiGRU enzyme classifier</span>
+    <div className="page">
+      <header className="header">
+        <h1>SequenceView</h1>
+        <p>Hydrolase / oxidoreductase classification and basic physicochemical analysis of protein sequences.</p>
       </header>
 
-      <main className="layout">
-        <section className="hero">
-          <h1>
-            Read a protein sequence, <span className="gradient-text">predict its function.</span>
-          </h1>
-          <p className="lead">
-            Classify enzymes as hydrolases or oxidoreductases and explore their biochemical profile in one view.
-          </p>
-        </section>
-
-        <section className="panel input-panel">
-          <form onSubmit={handleAnalyze} className="input-form">
-            <div className="input-head">
-              <label htmlFor="sequenceInput" className="label-title">
-                Sequence
-              </label>
-              <div className="input-head-actions">
-                <button type="button" className="link-button" onClick={() => loadText(EXAMPLE_SEQUENCE, "lysozyme-example.fasta")}>
+      <main>
+        <section className="section">
+          <form onSubmit={handleAnalyze}>
+            <div className="field-head">
+              <label htmlFor="sequenceInput">Input sequence (plain or FASTA)</label>
+              <span className="field-tools">
+                <button type="button" className="link" onClick={() => loadText(EXAMPLE_SEQUENCE, "lysozyme-example.fasta")}>
                   Load example
                 </button>
                 {sequenceInput ? (
-                  <button type="button" className="link-button" onClick={handleClear}>
+                  <button type="button" className="link" onClick={handleClear}>
                     Clear
                   </button>
                 ) : null}
-              </div>
+              </span>
             </div>
 
             <div
@@ -378,18 +357,17 @@ export default function App() {
                 spellCheck={false}
                 rows={6}
               />
-              {dragging ? <div className="drop-overlay">Drop a FASTA file to load it</div> : null}
             </div>
 
-            <div className="input-footer">
-              <div className="input-meta">
-                <span className="chip">{formatInteger(inputStats.residues)} residues</span>
-                {inputStats.headers > 1 ? <span className="chip chip-warn">{inputStats.headers} FASTA records (merged)</span> : null}
-                {filename ? <span className="chip chip-file">{filename}</span> : null}
-              </div>
-              <div className="row-actions">
-                <label className="btn btn-secondary" htmlFor="sequenceFile">
-                  Upload FASTA
+            <div className="form-footer">
+              <span className="meta">
+                {formatInteger(inputStats.residues)} characters
+                {inputStats.headers > 1 ? ` | ${inputStats.headers} FASTA records will be merged` : ""}
+                {filename ? ` | ${filename}` : ""}
+              </span>
+              <span className="actions">
+                <label className="button" htmlFor="sequenceFile">
+                  Upload file
                 </label>
                 <input
                   id="sequenceFile"
@@ -398,104 +376,89 @@ export default function App() {
                   onChange={handleFileUpload}
                   className="hidden-file-input"
                 />
-                <button type="submit" className="btn btn-primary" disabled={loading}>
-                  {loading ? <span className="spinner" aria-hidden="true" /> : null}
-                  {loading ? "Analysing..." : "Analyse sequence"}
+                <button type="submit" className="button button-primary" disabled={loading}>
+                  {loading ? "Running..." : "Run analysis"}
                 </button>
-              </div>
+              </span>
             </div>
 
             {error ? (
-              <p className="error-text" role="alert">
+              <p className="error" role="alert">
                 {error}
               </p>
             ) : null}
           </form>
         </section>
 
-        {loading && !result ? (
-          <section className="dashboard-grid" aria-hidden="true">
-            <div className="panel skeleton span-5" />
-            <div className="panel skeleton span-7" />
-          </section>
-        ) : null}
-
         {result ? (
-          <section className="dashboard-grid" ref={resultsRef}>
-            <article className={`panel verdict-card tone-${verdictTone} span-5`}>
-              <p className="eyebrow">Predicted function</p>
-              <h2>{verdict}</h2>
-              <div className="gauge" style={{ "--value": confidencePercent }}>
-                <div className="gauge-inner">
-                  <strong>{confidencePercent}%</strong>
-                  <span>confidence</span>
-                </div>
-              </div>
-              {isUncertain ? (
-                <p className="verdict-note">
-                  Below the {formatPercent(prediction.confidence_threshold)} threshold. Closest class: {prediction.predicted_class}.
-                </p>
-              ) : (
-                <p className="verdict-note">Margin between classes: {formatPercent(prediction.margin)}</p>
-              )}
-            </article>
+          <div ref={resultsRef}>
+            <section className="section">
+              <h2>Prediction</h2>
+              <table className="data">
+                <tbody>
+                  <tr>
+                    <th>Call</th>
+                    <td className={`call call-${verdictTone}`}>{verdict}</td>
+                  </tr>
+                  <tr>
+                    <th>Top class</th>
+                    <td>{prediction.predicted_class}</td>
+                  </tr>
+                  <tr>
+                    <th>Confidence</th>
+                    <td>
+                      {formatPercent(confidence)} (threshold {formatPercent(prediction.confidence_threshold)})
+                    </td>
+                  </tr>
+                  <tr>
+                    <th>Margin</th>
+                    <td>{formatPercent(prediction.margin)}</td>
+                  </tr>
+                </tbody>
+              </table>
 
-            <article className="panel span-7">
-              <div className="card-head">
-                <h3>Class probability</h3>
-                <span className="chip">{formatInteger(analysis.length)} aa</span>
-              </div>
-              <div className="bar-stack">
+              <div className="probs">
                 {probabilities.map((item) => (
-                  <div className="bar-item" key={item.label}>
-                    <div className="bar-label-line">
-                      <span>
-                        {item.label} <em>{item.ec}</em>
-                      </span>
-                      <strong>{formatPercent(item.value)}</strong>
+                  <div className="prob-row" key={item.label}>
+                    <span>
+                      {item.label} <small>{item.ec}</small>
+                    </span>
+                    <div className="track">
+                      <div className={`fill fill-${item.tone}`} style={{ width: `${item.value * 100}%` }} />
                     </div>
-                    <div className="bar-track bar-track-lg">
-                      <div className={`bar-fill fill-${item.tone}`} style={{ width: `${Math.max(2, item.value * 100)}%` }} />
-                    </div>
+                    <span className="num">{formatPercent(item.value)}</span>
                   </div>
                 ))}
               </div>
-              <div className="export-row">
-                <button type="button" className="btn btn-secondary btn-sm" onClick={exportJsonReport}>
-                  Export JSON
-                </button>
-                <button type="button" className="btn btn-secondary btn-sm" onClick={exportCsvReport}>
-                  Export CSV
-                </button>
-              </div>
-            </article>
+            </section>
 
-            <article className="panel span-12">
-              <h3>Sequence properties</h3>
-              <div className="stats-grid">
-                {stats.map((item) => (
-                  <div className="stat-item" key={item.label}>
-                    <span>{item.label}</span>
-                    <strong>{item.value}</strong>
-                    {item.hint ? (
-                      <em className={item.good === true ? "hint-good" : item.good === false ? "hint-bad" : ""}>{item.hint}</em>
-                    ) : null}
-                  </div>
-                ))}
-              </div>
-            </article>
+            <section className="section">
+              <h2>Sequence properties</h2>
+              <table className="data">
+                <tbody>
+                  {stats.map((item) => (
+                    <tr key={item.label}>
+                      <th>{item.label}</th>
+                      <td className="num">{item.value}</td>
+                      <td className="note">{item.hint || ""}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </section>
 
-            <article className="panel span-12">
-              <div className="card-head">
-                <h3>Sequence viewer</h3>
-                <button type="button" className="btn btn-secondary btn-sm" onClick={copySequence}>
-                  {copied ? "Copied" : "Copy sequence"}
-                </button>
+            <section className="section">
+              <div className="field-head">
+                <h2>Sequence</h2>
+                <span className="field-tools">
+                  <button type="button" className="link" onClick={copySequence}>
+                    {copied ? "Copied" : "Copy"}
+                  </button>
+                </span>
               </div>
               <div className="legend">
                 {Object.keys(GROUP_LABELS).map((group) => (
-                  <span key={group} className="legend-item">
-                    <i className={`dot res-${group}`} />
+                  <span key={group} className={`res-${group}`}>
                     {GROUP_LABELS[group]}
                   </span>
                 ))}
@@ -507,7 +470,7 @@ export default function App() {
                     {line.blocks.map((block, blockIndex) => (
                       <span className="seq-block" key={blockIndex}>
                         {block.split("").map((acid, acidIndex) => (
-                          <span key={acidIndex} className={`res res-${residueGroup(acid)}`}>
+                          <span key={acidIndex} className={`res-${residueGroup(acid)}`}>
                             {acid}
                           </span>
                         ))}
@@ -516,49 +479,62 @@ export default function App() {
                   </div>
                 ))}
               </div>
-            </article>
+            </section>
 
-            <article className="panel span-12">
-              <h3>Amino acid composition</h3>
-              <div className="group-strip" aria-label="Composition by residue class">
-                {Object.keys(GROUP_LABELS).map((group) => (
-                  <div
-                    key={group}
-                    className={`group-segment res-${group}`}
-                    style={{ flexGrow: Math.max(groupTotals[group], 0.01) }}
-                    title={`${GROUP_LABELS[group]}: ${formatPercent(groupTotals[group])}`}
-                  >
-                    <span>{GROUP_LABELS[group]}</span>
-                    <strong>{formatPercent(groupTotals[group])}</strong>
-                  </div>
-                ))}
-              </div>
+            <section className="section">
+              <h2>Composition</h2>
+              <table className="data data-compact">
+                <thead>
+                  <tr>
+                    <th>Class</th>
+                    <th className="num">Fraction</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {Object.keys(GROUP_LABELS).map((group) => (
+                    <tr key={group}>
+                      <th className={`res-${group}`}>{GROUP_LABELS[group]}</th>
+                      <td className="num">{formatPercent(groupTotals[group])}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
               <div className="amino-grid">
                 {aminoBars.map((item) => (
                   <div key={item.acid} className="amino-row">
-                    <span className={`acid-token res-${residueGroup(item.acid)}`}>{item.acid}</span>
-                    <div className="bar-track">
-                      <div className={`bar-fill fill-${residueGroup(item.acid)}`} style={{ width: `${Math.max(item.value > 0 ? 1 : 0, item.value * 100)}%` }} />
+                    <span className={`acid res-${residueGroup(item.acid)}`}>{item.acid}</span>
+                    <div className="track">
+                      <div className={`fill fill-${residueGroup(item.acid)}`} style={{ width: `${item.value * 100}%` }} />
                     </div>
-                    <span className="acid-value">{formatPercent(item.value)}</span>
+                    <span className="num">{formatPercent(item.value)}</span>
                   </div>
                 ))}
               </div>
-            </article>
+            </section>
 
             {invalidResidues.length ? (
-              <article className="panel span-12 warning-card">
-                <h3>Non-standard residues removed</h3>
-                <p>
-                  {invalidResidues.join(", ")} were excluded from the analysis and replaced with an unknown token for prediction.
-                </p>
-              </article>
+              <section className="section notice">
+                Non-standard residues ({invalidResidues.join(", ")}) were excluded from the property calculations and
+                encoded as unknown for the classifier.
+              </section>
             ) : null}
-          </section>
+
+            <section className="section">
+              <h2>Export</h2>
+              <span className="actions">
+                <button type="button" className="button" onClick={exportJsonReport}>
+                  JSON
+                </button>
+                <button type="button" className="button" onClick={exportCsvReport}>
+                  CSV
+                </button>
+              </span>
+            </section>
+          </div>
         ) : null}
       </main>
 
-      <footer className="footer">SequenceView &middot; trained on reviewed UniProt entries &middot; for research use only</footer>
+      <footer className="footer">Predictions are from a baseline model trained on UniProt annotations and may be wrong.</footer>
     </div>
   );
 }
