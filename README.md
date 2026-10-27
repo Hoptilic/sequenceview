@@ -2,19 +2,21 @@
 
 ## Overview
 
-SequenceView is a full-stack bioinformatics app designed to analyse and classify protein sequences. It combines a custom-trained PyTorch Bidirectional GRU (BiGRU) model for function predictions (Hydrolase EC 3.* vs Oxidoreductase EC 1.*) with a modern React frontend for ease of use.
+SequenceView is a full-stack bioinformatics app that analyses and classifies protein sequences. It combines a custom-trained PyTorch Bidirectional GRU (BiGRU) model for function predictions (Hydrolase EC 3.* vs Oxidoreductase EC 1.*) with a React frontend.
 
 ![SequenceView Import](./assets/dashboard_input.png)
 ![SequenceView Report](./assets/dashboard_report.png)
 
 ## Features
 
-This app does a couple cool things out of the box:
-
-1. A neural network predicts protein functions using a PyTorch BiGRU model trained on reviewed UniProt entries
-2. Leverages Biopython to do a biochemical analysis, calculating molecular weight, isoelectric point (pI), GRAVY, and instability index
-3. A responsive React frontend featuring sequence validation, amino acid frequency visualization, and FASTA file processing
-4. Built-in data export capability to export results to CSV/JSON formats
+- Hydrolase (EC 3.*) versus oxidoreductase (EC 1.*) classification with a PyTorch BiGRU trained on reviewed UniProt entries.
+- Multi-record FASTA input. Each record is classified separately and listed in a sortable, filterable table that can be exported to CSV.
+- Per-residue attribution (gradient times input) shown as a heat strip and as shading on the sequence.
+- Temperature-scaled confidence, with warnings for sequences outside the training length range, truncation at the model's maximum length, and non-standard residues.
+- Biopython analysis: molecular weight, isoelectric point, net charge at pH 7, GRAVY, instability index, aromaticity, extinction coefficient and secondary-structure propensity fractions, plus hydropathy and charge-versus-pH plots.
+- Motif search with PROSITE syntax or regular expressions, highlighted on the sequence.
+- A Model tab with the checkpoint hash, training counts, held-out test metrics, confusion matrix and calibration figures.
+- Exports as JSON, CSV or a standalone HTML report, and shareable links that restore the input.
 
 ## Model
 
@@ -33,8 +35,6 @@ This project includes a Flask backend in [src/sequenceview/app.py](src/sequencev
 2. Uses Biopython to parse/analyze it (molecular weight, amino acid frequency, and related protein properties).
 3. Runs inference with the trained PyTorch classifier.
 4. Returns analysis + prediction JSON for frontend consumption.
-
-Currently, it is very powerful with interfacing with the model, using Biopython to infer molecular weight, residues, isoelectric point, GRAVY and other relevant biochemical elements.
 
 ### Backend Files
 
@@ -66,7 +66,7 @@ If omitted, the backend defaults to `protein_classifier.pt` in the project root.
 PYTHONPATH=src python -m sequenceview.app
 ```
 
-The API starts on `http://localhost:5000`.
+The API starts on `http://localhost:5000`. Set `HOST` to change the bind address and `FLASK_DEBUG=1` to enable debug mode.
 
 ## Frontend (React)
 
@@ -100,43 +100,51 @@ export SEQUENCEVIEW_FRONTEND_DIST=/absolute/path/to/frontend/dist
 
 ### Dashboard Exports
 
-After an analysis is complete, the dashboard can export results as:
+For a single record the dashboard can export:
 
-- JSON (`sequenceview-report.json`) with full API payload.
-- CSV (`sequenceview-report.csv`) with key metrics, probabilities, and amino-acid frequency rows.
+- JSON (`sequenceview-<id>.json`) with the full API payload.
+- CSV (`sequenceview-<id>.csv`) with the prediction, properties, warnings and amino-acid frequencies.
+- A standalone HTML report with the model version and hash, prediction, properties and sequence.
+
+Batch results export as a single CSV with one row per record. "Copy link" stores the input in the URL fragment (up to about 6,000 characters), so shared links are never sent to the server until opened.
 
 ### Endpoints
 
 - `GET /health`
 	- Returns API readiness and whether the checkpoint is loaded.
 
+- `GET /api/model`
+	- Returns the checkpoint version and SHA-256, maximum length, temperature, confidence threshold and the metadata stored by the notebook (training counts, test metrics, calibration).
+
 - `POST /api/predict`
-	- Request body:
+	- Request body: `{"sequence": "MVLSPADKTNVKAA"}`. Plain sequence or a single FASTA record. Input with more than one record is rejected; use the batch endpoint.
+	- Response fields:
+		- `input`: record id and sequence.
+		- `analysis`: Biopython properties, amino acid counts and frequencies, hydropathy profile, charge curve.
+		- `prediction`: `class_name`, `predicted_class`, `confidence`, `margin`, `probabilities`, `is_uncertain`, `calibrated`, `temperature`.
+		- `attribution`: per-residue scores in [-1, 1] for the predicted class.
+		- `warnings`: list of `{code, message}` for out-of-distribution input.
+		- `model`: version, checkpoint hash and training counts, included with every prediction.
 
-```json
-{
-	"sequence": "MVLSPADKTNVKAA"
-}
-```
-
-	- Input tips:
-		- You can send plain amino acid sequence text or FASTA text.
-		- FASTA header lines starting with `>` are ignored automatically.
-		- For best results, provide the canonical amino acid sequence only.
-
-	- Response includes:
-		- Input sequence
-		- Biopython stats (`molecular_weight`, `amino_acid_frequency`, etc.)
-		- Model output (`class_name`, class probabilities)
-		- Confidence fields (`confidence`, `margin`, `is_uncertain`)
+- `POST /api/predict/batch`
+	- Request body: `{"sequence": "<multi-record FASTA>"}` or `{"records": [{"id": "a", "sequence": "..."}]}`. At most 500 records.
+	- Returns `results`, one summary per record (call, confidence, probabilities, headline properties, warnings). A record that cannot be analysed has an `error` instead. Attribution is not computed in batch mode.
 
 ### Confidence Handling
 
-The classifier now marks low-confidence predictions as `uncertain` instead of forcing a hard class.
+- `prediction.class_name` is `uncertain` when confidence is below the threshold (default `0.70`, set with `SEQUENCEVIEW_CONFIDENCE_THRESHOLD`).
+- `prediction.predicted_class` is always the top raw class.
+- Probabilities are divided by the temperature stored in the checkpoint before the softmax. The notebook fits it on the validation split and records the test expected calibration error before and after. Checkpoints trained before this change have no temperature, so their probabilities are the raw softmax output and are likely overconfident.
 
-- `prediction.class_name` is `uncertain` when confidence is below threshold.
-- `prediction.predicted_class` still shows the top raw class.
-- Default threshold is `0.70` and can be changed via `SEQUENCEVIEW_CONFIDENCE_THRESHOLD`.
+### Tests
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest
+cd frontend && bun run test
+```
+
+The backend tests build a tiny random-weight checkpoint, so they do not need `protein_classifier.pt`. GitHub Actions runs both suites and the frontend build on pushes and pull requests.
 
 ## Training Workflow
 
@@ -149,18 +157,19 @@ The notebook does everything end-to-end:
 3. Caches data to `/content/uniprot_binary_dataset.jsonl`.
 4. Splits data with a sequence-identity-aware strategy to reduce leakage.
 5. Trains a BiGRU-based classifier with AMP, gradient clipping, and early stopping.
-6. Evaluates on a held-out test split.
-7. Saves a checkpoint to Google Drive (if mounted) or local Colab storage.
+6. Evaluates on a held-out test split, including confusion matrix counts.
+7. Fits a temperature on the validation split and records calibration error.
+8. Saves a checkpoint to Google Drive (if mounted) or local Colab storage.
 
 ## Outputs
 
 - Per-epoch metrics: `train_loss`, `train_accuracy`, `validation_loss`, `validation_accuracy`
-- Final test metrics dictionary
+- Final test metrics dictionary and calibration figures
 - Saved checkpoint path (default: `/content/drive/MyDrive/protein_classifier.pt`)
 - Example inference output for a short amino acid sequence
 
 ## Notes
 
-- This is a practical baseline for experimentation, not a production biology model.
+- This is a baseline model for experimentation, not a production biology model.
 - Labels are annotation-derived from UniProt queries and may include noise.
 - If you change class counts or split parameters, rerun the training cell to regenerate cache and metrics.

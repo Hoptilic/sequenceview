@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,7 @@ AA_ALPHABET = "ACDEFGHIKLMNPQRSTVWY"
 AMINO_ACID_TO_INDEX = {amino_acid: index + 1 for index, amino_acid in enumerate(AA_ALPHABET)}
 UNKNOWN_INDEX = len(AMINO_ACID_TO_INDEX) + 1
 PAD_INDEX = 0
+CLASS_NAMES = ("hydrolase", "oxidoreductase")
 
 
 class ProteinClassifier(nn.Module):
@@ -31,8 +33,9 @@ class ProteinClassifier(nn.Module):
         )
 
     def forward(self, inputs: torch.Tensor) -> torch.Tensor:
-        mask = inputs != PAD_INDEX
-        embeddings = self.embedding(inputs)
+        return self.classify(self.embedding(inputs), inputs != PAD_INDEX)
+
+    def classify(self, embeddings: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
         outputs, _ = self.encoder(embeddings)
         outputs = outputs * mask.unsqueeze(-1)
         lengths = mask.sum(dim=1).clamp(min=1).unsqueeze(-1)
@@ -41,6 +44,14 @@ class ProteinClassifier(nn.Module):
         max_pool = torch.where(torch.isfinite(max_pool), max_pool, torch.zeros_like(max_pool))
         features = torch.cat([mean_pool, max_pool], dim=1)
         return self.head(features)
+
+
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 
 def clean_sequence(sequence: str) -> str:
@@ -63,6 +74,8 @@ class ProteinModelService:
         self.model: ProteinClassifier | None = None
         self.max_length = 768
         self.metadata: dict[str, Any] = {}
+        self.temperature = 1.0
+        self.checkpoint_sha256 = ""
         self.model_loaded = False
         self.confidence_threshold = float(os.getenv("SEQUENCEVIEW_CONFIDENCE_THRESHOLD", "0.70"))
 
@@ -70,13 +83,20 @@ class ProteinModelService:
         if not self.checkpoint_path.exists():
             raise FileNotFoundError(f"Checkpoint not found: {self.checkpoint_path}")
 
-        checkpoint = torch.load(self.checkpoint_path, map_location=self.device)
+        self.checkpoint_sha256 = file_sha256(self.checkpoint_path)
+        checkpoint = torch.load(self.checkpoint_path, map_location=self.device, weights_only=True)
         vocab_size = int(checkpoint.get("vocab_size", len(AMINO_ACID_TO_INDEX) + 2))
         self.max_length = int(checkpoint.get("max_length", 768))
         self.metadata = dict(checkpoint.get("metadata", {}))
+        self.temperature = float(checkpoint.get("temperature", 1.0))
 
-        model = ProteinClassifier(vocab_size=vocab_size)
-        model.load_state_dict(checkpoint["state_dict"])
+        state_dict = checkpoint["state_dict"]
+        model = ProteinClassifier(
+            vocab_size=vocab_size,
+            embedding_dim=int(state_dict["embedding.weight"].shape[1]),
+            hidden_dim=int(state_dict["encoder.weight_hh_l0"].shape[1]),
+        )
+        model.load_state_dict(state_dict)
         model.to(self.device)
         model.eval()
 
@@ -89,10 +109,11 @@ class ProteinModelService:
 
         input_tensor = encode_sequence(sequence, self.max_length).unsqueeze(0).to(self.device)
         with torch.no_grad():
-            probabilities = torch.softmax(self.model(input_tensor), dim=1)[0].cpu()
+            logits = self.model(input_tensor) / self.temperature
+            probabilities = torch.softmax(logits, dim=1)[0].cpu()
 
         predicted_index = int(probabilities.argmax().item())
-        predicted_class = "oxidoreductase" if predicted_index == 1 else "hydrolase"
+        predicted_class = CLASS_NAMES[predicted_index]
         confidence = float(probabilities[predicted_index].item())
         hydrolase_probability = float(probabilities[0].item())
         oxidoreductase_probability = float(probabilities[1].item())
@@ -111,6 +132,49 @@ class ProteinModelService:
                 "hydrolase": hydrolase_probability,
                 "oxidoreductase": oxidoreductase_probability,
             },
+            "calibrated": self.temperature != 1.0,
+            "temperature": self.temperature,
             "max_length": self.max_length,
+        }
+
+    def attribute(self, sequence: str) -> dict[str, Any]:
+        """Gradient x input saliency for the predicted class, one score per residue in [-1, 1]."""
+        if not self.model_loaded or self.model is None:
+            raise RuntimeError("Model is not loaded")
+
+        tokens = encode_sequence(sequence, self.max_length).unsqueeze(0).to(self.device)
+        mask = tokens != PAD_INDEX
+        length = min(len(sequence), self.max_length)
+
+        # cuDNN refuses to backpropagate through RNNs in eval mode.
+        with torch.backends.cudnn.flags(enabled=False):
+            embeddings = self.model.embedding(tokens).detach().requires_grad_(True)
+            logits = self.model.classify(embeddings, mask)[0]
+            target = int(logits.argmax().item())
+            (logits[target] - logits[1 - target]).backward()
+
+        scores = (embeddings.grad * embeddings).sum(dim=-1)[0, :length].detach().cpu()
+        peak = float(scores.abs().max().item()) if length else 0.0
+        if peak > 0:
+            scores = scores / peak
+
+        return {
+            "method": "gradient x input",
+            "target": CLASS_NAMES[target],
+            "length": length,
+            "scores": [round(float(score), 4) for score in scores],
+        }
+
+    def info(self) -> dict[str, Any]:
+        return {
+            "loaded": self.model_loaded,
+            "version": self.checkpoint_sha256[:12],
+            "checkpoint_sha256": self.checkpoint_sha256,
+            "checkpoint_path": str(self.checkpoint_path),
+            "classes": list(CLASS_NAMES),
+            "max_length": self.max_length,
+            "temperature": self.temperature,
+            "confidence_threshold": self.confidence_threshold,
+            "device": str(self.device),
             "metadata": self.metadata,
         }

@@ -2,4 +2,4 @@ requests
 torch
 tqdm
 flask
-biopython
+biopython>=1.79
