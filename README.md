@@ -4,8 +4,9 @@
 
 SequenceView is a full-stack bioinformatics app that analyses and classifies protein sequences. It combines a custom-trained PyTorch Bidirectional GRU (BiGRU) model for function predictions (Hydrolase EC 3.* vs Oxidoreductase EC 1.*) with a React frontend.
 
-![SequenceView Import](./assets/dashboard_input.png)
-![SequenceView Report](./assets/dashboard_report.png)
+![Sequence input](./assets/dashboard_input.png)
+![Single-record report](./assets/dashboard_report.png)
+![Batch results](./assets/dashboard_batch.png)
 
 ## Features
 
