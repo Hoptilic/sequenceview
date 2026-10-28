@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import math
 import os
 from pathlib import Path
 from typing import Any
@@ -36,14 +37,16 @@ class ProteinClassifier(nn.Module):
         return self.classify(self.embedding(inputs), inputs != PAD_INDEX)
 
     def classify(self, embeddings: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
+        return self.head(self.features(embeddings, mask))
+
+    def features(self, embeddings: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
         outputs, _ = self.encoder(embeddings)
         outputs = outputs * mask.unsqueeze(-1)
         lengths = mask.sum(dim=1).clamp(min=1).unsqueeze(-1)
         mean_pool = outputs.sum(dim=1) / lengths
         max_pool = outputs.masked_fill(~mask.unsqueeze(-1), float("-inf")).max(dim=1).values
         max_pool = torch.where(torch.isfinite(max_pool), max_pool, torch.zeros_like(max_pool))
-        features = torch.cat([mean_pool, max_pool], dim=1)
-        return self.head(features)
+        return torch.cat([mean_pool, max_pool], dim=1)
 
 
 def file_sha256(path: Path) -> str:
@@ -135,6 +138,73 @@ class ProteinModelService:
             "calibrated": self.temperature != 1.0,
             "temperature": self.temperature,
             "max_length": self.max_length,
+        }
+
+    def embed(self, sequence: str) -> list[float]:
+        """Pooled BiGRU features (the vector the classifier head sees) for one sequence."""
+        if not self.model_loaded or self.model is None:
+            raise RuntimeError("Model is not loaded")
+
+        tokens = encode_sequence(sequence, self.max_length).unsqueeze(0).to(self.device)
+        with torch.no_grad():
+            features = self.model.features(self.model.embedding(tokens), tokens != PAD_INDEX)
+        return features[0].cpu().tolist()
+
+    def scan_mutations(self, sequence: str, start: int, end: int, batch_size: int = 256) -> dict[str, Any]:
+        """Change in oxidoreductase probability for every single substitution in [start, end).
+
+        Inputs are padded to the sequence length (rounded up to 32) rather than the training length,
+        which is several times faster and moves predictions only marginally. The baseline is computed
+        at the same padding so the deltas are self-consistent. Deltas are reported in log-odds of the
+        oxidoreductase class, which stay informative when the probability is saturated.
+        """
+        if not self.model_loaded or self.model is None:
+            raise RuntimeError("Model is not loaded")
+
+        cleaned = clean_sequence(sequence)[: self.max_length]
+        start = max(0, start)
+        end = min(end, len(cleaned))
+        if start >= end:
+            raise ValueError("Empty scan region.")
+
+        pad_to = min(self.max_length, -(-len(cleaned) // 32) * 32)
+        base = encode_sequence(cleaned, pad_to)
+        variants = []
+        for position in range(start, end):
+            for amino_acid in AA_ALPHABET:
+                variant = base.clone()
+                variant[position] = AMINO_ACID_TO_INDEX[amino_acid]
+                variants.append(variant)
+
+        log_odds = []
+        with torch.no_grad():
+            baseline_logits = self.model(base.unsqueeze(0).to(self.device)) / self.temperature
+            baseline_log_odds = float((baseline_logits[0, 1] - baseline_logits[0, 0]).item())
+            for offset in range(0, len(variants), batch_size):
+                batch = torch.stack(variants[offset:offset + batch_size]).to(self.device)
+                logits = self.model(batch) / self.temperature
+                log_odds.extend((logits[:, 1] - logits[:, 0]).cpu().tolist())
+
+        baseline = 1 / (1 + math.exp(-baseline_log_odds))
+
+        width = len(AA_ALPHABET)
+        positions = []
+        for row, position in enumerate(range(start, end)):
+            values = log_odds[row * width:(row + 1) * width]
+            positions.append({
+                "index": position,
+                "residue": cleaned[position],
+                "delta_log_odds": [round(value - baseline_log_odds, 3) for value in values],
+                "delta_probability": [round(1 / (1 + math.exp(-value)) - baseline, 4) for value in values],
+            })
+
+        return {
+            "alphabet": AA_ALPHABET,
+            "baseline_oxidoreductase": round(baseline, 4),
+            "baseline_log_odds": round(baseline_log_odds, 3),
+            "start": start,
+            "end": end,
+            "positions": positions,
         }
 
     def attribute(self, sequence: str) -> dict[str, Any]:

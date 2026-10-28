@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import BatchTable from "./components/BatchTable.jsx";
+import Compare from "./components/Compare.jsx";
 import Detail from "./components/Detail.jsx";
+import EmbeddingPlot from "./components/EmbeddingPlot.jsx";
 import ModelPanel from "./components/ModelPanel.jsx";
 import { requestJson } from "./lib/api.js";
 import { parseFastaRecords } from "./lib/fasta.js";
@@ -184,6 +186,9 @@ export default function App() {
           <button type="button" className={tab === "analyse" ? "tab active" : "tab"} onClick={() => setTab("analyse")}>
             Analyse
           </button>
+          <button type="button" className={tab === "compare" ? "tab active" : "tab"} onClick={() => setTab("compare")}>
+            Compare
+          </button>
           <button type="button" className={tab === "model" ? "tab active" : "tab"} onClick={() => setTab("model")}>
             Model
           </button>
@@ -192,6 +197,7 @@ export default function App() {
 
       <main>
         {tab === "model" ? <ModelPanel /> : null}
+        {tab === "compare" ? <Compare /> : null}
 
         {tab === "analyse" ? (
           <>
@@ -280,6 +286,13 @@ export default function App() {
                     onExport={() => downloadFile(buildBatchCsv(batch.results), "sequenceview-batch.csv", "text/csv;charset=utf-8")}
                   />
                   <p className="note stamp">Model {batch.model.version}. Select a record for the full report.</p>
+                </section>
+              ) : null}
+
+              {batch?.projection ? (
+                <section className="section">
+                  <h2>Embedding map</h2>
+                  <EmbeddingPlot projection={batch.projection} results={batch.results} selected={selected} onSelect={openRecord} />
                 </section>
               ) : null}
 
