@@ -29,7 +29,7 @@ export function AttributionStrip({ scores }) {
   );
 }
 
-export default function SequenceViewer({ sequence, scores, mode, motifMask, predictedClass }) {
+export default function SequenceViewer({ sequence, scores, mode, motifMask, predictedClass, focus, onSelectPosition }) {
   const lines = useMemo(() => chunkSequence(sequence), [sequence]);
   const hasScores = Boolean(scores?.length);
   const showAttribution = mode === "attribution" && hasScores;
@@ -72,12 +72,16 @@ export default function SequenceViewer({ sequence, scores, mode, motifMask, pred
                   if (motifMask?.[position]) {
                     classes.push("motif");
                   }
+                  if (position === focus) {
+                    classes.push("focused");
+                  }
                   return (
                     <span
                       key={offset}
                       className={classes.join(" ")}
                       style={showAttribution && score !== undefined ? { "--w": Math.abs(score) } : undefined}
                       title={`${acid}${position + 1}${score !== undefined ? ` (${score.toFixed(2)})` : ""}`}
+                      onClick={onSelectPosition ? () => onSelectPosition(position) : undefined}
                     >
                       {acid}
                     </span>

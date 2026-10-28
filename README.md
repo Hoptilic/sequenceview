@@ -15,7 +15,12 @@ SequenceView is a full-stack bioinformatics app that analyses and classifies pro
 - Per-residue attribution (gradient times input) shown as a heat strip and as shading on the sequence.
 - Temperature-scaled confidence, with warnings for sequences outside the training length range, truncation at the model's maximum length, and non-standard residues.
 - Biopython analysis: molecular weight, isoelectric point, net charge at pH 7, GRAVY, instability index, aromaticity, extinction coefficient and secondary-structure propensity fractions, plus hydropathy and charge-versus-pH plots.
-- Motif search with PROSITE syntax or regular expressions, highlighted on the sequence.
+- Motif search with PROSITE syntax or regular expressions, highlighted on the sequence, plus an automatic scan against a bundled library of 21 PROSITE signatures and two structural heuristics, compared with the model's call.
+- Predicted 3D structure from the AlphaFold Database (looked up by UniProt accession), coloured by attribution, pLDDT, hydropathy or residue class, with a contact map that overlays the model's attribution.
+- In-silico mutation scan: a heat map of how every single substitution in a region shifts the classifier's output, with a per-position sensitivity profile.
+- Estimated secondary-structure ribbon (Chou-Fasman propensities) and a helical wheel with hydrophobic moment.
+- Batch embedding map: a PCA projection of the classifier's pooled features for every record in a multi-FASTA.
+- Pairwise alignment of two sequences (BLOSUM62) alongside both predictions and the change in probability.
 - A Model tab with the checkpoint hash, training counts, held-out test metrics, confusion matrix and calibration figures.
 - Exports as JSON, CSV or a standalone HTML report, and shareable links that restore the input.
 
@@ -125,17 +130,28 @@ Batch results export as a single CSV with one row per record. "Copy link" stores
 		- `prediction`: `class_name`, `predicted_class`, `confidence`, `margin`, `probabilities`, `is_uncertain`, `calibrated`, `temperature`.
 		- `attribution`: per-residue scores in [-1, 1] for the predicted class.
 		- `warnings`: list of `{code, message}` for out-of-distribution input.
+		- `motifs`: library signatures found in the sequence, with 0-based half-open match ranges and the class each is typically associated with.
 		- `model`: version, checkpoint hash and training counts, included with every prediction.
+
+- `POST /api/mutscan`
+	- Request body: `{"sequence": "...", "start": 0, "end": 120}` (0-based, end exclusive; at most 250 residues). Returns the change in the oxidoreductase log-odds and probability for each of the 20 residues at each position, plus the baseline. Inputs are padded to the sequence length rather than the training length for speed, so values differ marginally from `/api/predict`. It describes the network's sensitivity, not enzyme activity.
+
+- `POST /api/compare`
+	- Request body: `{"a": "<one record>", "b": "<one record>"}`. Returns both predictions, a global BLOSUM62 alignment with identity and similarity, and the change in oxidoreductase probability. Up to 2000 residues each.
 
 - `POST /api/predict/batch`
 	- Request body: `{"sequence": "<multi-record FASTA>"}` or `{"records": [{"id": "a", "sequence": "..."}]}`. At most 500 records.
-	- Returns `results`, one summary per record (call, confidence, probabilities, headline properties, warnings). A record that cannot be analysed has an `error` instead. Attribution is not computed in batch mode.
+	- Returns `results`, one summary per record (call, confidence, probabilities, headline properties, warnings). A record that cannot be analysed has an `error` instead. Attribution is not computed in batch mode. With three or more scored records the response also includes `projection`, a two-component PCA of the pooled model features.
 
 ### Confidence Handling
 
 - `prediction.class_name` is `uncertain` when confidence is below the threshold (default `0.70`, set with `SEQUENCEVIEW_CONFIDENCE_THRESHOLD`).
 - `prediction.predicted_class` is always the top raw class.
 - Probabilities are divided by the temperature stored in the checkpoint before the softmax. The notebook fits it on the validation split and records the test expected calibration error before and after. Checkpoints trained before this change have no temperature, so their probabilities are the raw softmax output and are likely overconfident.
+
+### External requests
+
+The only request the dashboard makes outside your machine is the optional structure lookup, which sends a UniProt accession to `alphafold.ebi.ac.uk` and downloads the model file. Sequences are never sent anywhere other than your own Flask server. The structure is AlphaFold's prediction for the UniProt reference sequence, so it is only matched to your input when the input is a contiguous part of that sequence.
 
 ### Tests
 

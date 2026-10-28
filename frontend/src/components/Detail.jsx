@@ -1,7 +1,12 @@
 import { useMemo, useState } from "react";
 
 import { ChargePlot, HydropathyPlot } from "./Charts.jsx";
+import HelicalWheel from "./HelicalWheel.jsx";
+import MotifHits from "./MotifHits.jsx";
+import MutationScan from "./MutationScan.jsx";
+import Ribbon from "./Ribbon.jsx";
 import SequenceViewer, { AttributionStrip } from "./SequenceViewer.jsx";
+import Structure from "./Structure.jsx";
 import { downloadFile, formatInteger, formatNumber, formatPercent } from "../lib/format.js";
 import { findMotifs, motifMask } from "../lib/motif.js";
 import { GROUP_LABELS, normalizeFrequencies, residueGroup } from "../lib/residues.js";
@@ -15,13 +20,19 @@ function fileStem(result) {
 export default function Detail({ result, onShare, shareState }) {
   const [mode, setMode] = useState("attribution");
   const [motifText, setMotifText] = useState("");
+  const [focus, setFocus] = useState(null);
+  const [libraryHit, setLibraryHit] = useState(null);
 
-  const { prediction, analysis, attribution, warnings = [], model } = result;
+  const { prediction, analysis, attribution, warnings = [], motifs = [], model } = result;
   const sequence = analysis.prediction_sequence;
   const scores = attribution?.scores;
 
   const motif = useMemo(() => findMotifs(sequence, motifText), [sequence, motifText]);
-  const mask = useMemo(() => motifMask(sequence.length, motif.matches), [sequence, motif]);
+  const highlights = useMemo(
+    () => [...motif.matches, ...(libraryHit ? libraryHit.matches : [])],
+    [motif, libraryHit],
+  );
+  const mask = useMemo(() => motifMask(sequence.length, highlights), [sequence, highlights]);
 
   const aminoBars = useMemo(() => normalizeFrequencies(analysis.amino_acid_frequency), [analysis]);
   const groupTotals = useMemo(() => {
@@ -125,6 +136,16 @@ export default function Detail({ result, onShare, shareState }) {
       </section>
 
       <section className="section">
+        <h2>Known motifs</h2>
+        <MotifHits
+          hits={motifs}
+          predictedClass={prediction.predicted_class}
+          selectedKey={libraryHit ? `${libraryHit.source}:${libraryHit.name}` : null}
+          onSelect={setLibraryHit}
+        />
+      </section>
+
+      <section className="section">
         <div className="field-head">
           <h2>Sequence</h2>
           <span className="field-tools">
@@ -138,6 +159,7 @@ export default function Detail({ result, onShare, shareState }) {
         </div>
 
         {mode === "attribution" && scores ? <AttributionStrip scores={scores} /> : null}
+        <Ribbon sequence={sequence} />
 
         <div className="motif-row">
           <label htmlFor="motifInput">Motif search</label>
@@ -154,13 +176,31 @@ export default function Detail({ result, onShare, shareState }) {
           </span>
         </div>
 
-        <SequenceViewer sequence={sequence} scores={scores} mode={mode} motifMask={mask} predictedClass={attribution?.target} />
+        <SequenceViewer
+          sequence={sequence}
+          scores={scores}
+          mode={mode}
+          motifMask={mask}
+          predictedClass={attribution?.target}
+          focus={focus}
+          onSelectPosition={(position) => setFocus(position === focus ? null : position)}
+        />
         {mode === "attribution" && scores ? (
           <p className="note">
             Gradient times input on the logit difference for the predicted class, scaled to the largest magnitude. It shows
             which positions the output is most sensitive to, not which residues are catalytically relevant.
           </p>
         ) : null}
+      </section>
+
+      <section className="section">
+        <h2>Predicted structure</h2>
+        <Structure header={result.input.id} sequence={sequence} scores={scores} focus={focus} highlights={highlights} />
+      </section>
+
+      <section className="section">
+        <h2>Mutation scan</h2>
+        <MutationScan header={result.input.id} sequence={sequence} focus={focus} onFocus={setFocus} />
       </section>
 
       <section className="section">
@@ -186,6 +226,11 @@ export default function Detail({ result, onShare, shareState }) {
             <ChargePlot curve={analysis.charge_curve} isoelectricPoint={analysis.isoelectric_point} />
           </figure>
         </div>
+      </section>
+
+      <section className="section">
+        <h2>Helical wheel</h2>
+        <HelicalWheel sequence={sequence} onFocus={(position) => setFocus(position)} />
       </section>
 
       <section className="section">
